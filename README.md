@@ -111,4 +111,3 @@ When starting a new feature or task, follow this workflow:
 3. Write your code, test it, and commit.
 4. Push your branch: `git push origin feature/your-feature-name`
 5. Go to GitHub and open a **Pull Request (PR)** so the team can review it before merging.
-```
