@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Environment Variables (CRITICAL)
+.env
+
+# Data and Embeddings (These files are too large for Git)
+data/raw/
+data/logs/
+*.csv
+*.model
+*.vec
+*.bin
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# LaTeX build files (Keep docs folder clean)
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk

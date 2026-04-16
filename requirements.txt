@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+seaborn
+gensim
+google-generativeai
+anthropic
+python-dotenv
+tqdm
+jupyter
