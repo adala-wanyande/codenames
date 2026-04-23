@@ -7,16 +7,15 @@ SAMPLE_VOCAB = [
     "Umbrella", "Van", "Water", "Xylophone", "Yacht", "Zebra", "Airplane", "Bear", "Cat",
     "Dance", "Eagle", "Fire", "Gold", "Helicopter", "Island", "Jungle", "Kangaroo", "Lion",
     "Mountain", "Ninja", "Octopus", "Pirate", "Robot", "Spider", "Train", "Unicorn",
-    "Vampire", "Whale", "Ninja", "Zombie"
+    "Vampire", "Whale", "Zombie"
 ]
 
 def run_automated_game():
     print("🤖 STARTING AI vs AI CODENAMES MATCH 🤖\n")
     
     game = CodenamesGame(SAMPLE_VOCAB)
-    spymaster = LLMSpymaster(name="Spymaster Qwen", model_type="ollama", model_name="qwen2.5")
     operative = LLMOperative(name="Operative Qwen", model_type="ollama", model_name="qwen2.5")
-
+    spymaster = LLMSpymaster(name="Spymaster Qwen", model_type="ollama", model_name="qwen2.5", operative=operative)
     # EIRINI'S REQUEST: Initial Spymaster Board Visualization
     print("👀 INITIAL SPYMASTER BOARD 👀")
     game.display(view="spymaster")
@@ -24,43 +23,71 @@ def run_automated_game():
     while not game.is_game_over:
         game.turn_count += 1
         print(f"\n{'='*10} TURN {game.turn_count} {'='*10}")
-        
-        # --- SPYMASTER PHASE ---
+
+        # ---------------- SPYMASTER ----------------
+        team_color = game.current_team
         spymaster_board = game.get_spymaster_board()
-        
-        # EIRINI'S REQUEST: We no longer slice [:3]. We pass ALL unrevealed targets.
-        unrevealed_targets = game.get_unrevealed_targets()
-        print(f"Total targets left to connect: {len(unrevealed_targets)}")
-        
-        # The Spymaster agent now decides the clue AND the count
-        clue, count = spymaster.give_clue(spymaster_board, unrevealed_targets)
+        unrevealed_targets = game.get_unrevealed_targets(team_color)
+
+        print(f" Team to play: {team_color}")
+        print(f"Total targets left: {len(unrevealed_targets)}")
+        print(f"Unrevealed targets: {unrevealed_targets}")
+
+        clue, count = spymaster.group_words(spymaster_board, unrevealed_targets)
         print(f"🎤 Spymaster says: '{clue}' for {count}")
-        
+
         if not game.is_valid_clue(clue):
-            print("❌ Spymaster gave an illegal clue! Skipping turn.")
+            print("❌ Illegal clue. Turn skipped.")
+            game.switch_team()
             continue
 
-        # --- OPERATIVE PHASE ---
+        # ---------------- OPERATIVE ----------------
         operative_board = game.get_operative_board()
+        print(f"🤔 Operative thinking on '{clue}' ({count} guesses allowed)")
+
         guessed_words = operative.guess_words(operative_board, clue, count)
         print(f"🤔 Operative guesses: {guessed_words}")
-        
+
+        guesses_left = count
+
         for guess in guessed_words:
-            print(f" -> Revealing '{guess}'...")
-            identity, continue_turn, game_over = game.process_guess(guess)
-            
-            if identity:
-                print(f"    Result: It's a [{identity}]!")
-            else:
-                print(f"    Result: Invalid word. AI hallucinated!")
-                break
-                
-            if game_over:
-                break
-            if not continue_turn:
-                print("    Turn ends early!")
+            if guesses_left <= 0:
                 break
 
+            print(f" -> Revealing '{guess}'...")
+
+            identity, continue_turn, game_over = game.process_guess(guess)
+
+            if not identity:
+                print("    ❌ Invalid word (hallucination)")
+                break
+
+            print(f"    Result: {identity}")
+
+            # GAME OVER
+            if game_over:
+                break
+
+            # ASSASSIN
+            if identity == "Assassin":
+                print("💀 Assassin hit!")
+                break
+
+            # WRONG TEAM (Blue/Neutral depending on current team)
+            if identity != team_color:
+                print("    ❌ Wrong guess → turn ends")
+                break
+
+            # CORRECT GUESS
+            print("    ✅ Correct guess → can continue")
+            guesses_left -= 1
+
+            if not continue_turn:
+                break
+
+        # IMPORTANT: switch team AFTER full turn ends
+        game.switch_team()
+            
     # --- GAME OVER ---
     print("\n" + "*"*30)
     print("GAME OVER!")
