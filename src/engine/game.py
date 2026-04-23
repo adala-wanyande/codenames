@@ -23,6 +23,7 @@ class CodenamesGame:
         self.winner = None  # 'Red' (Win) or 'Assassin' (Loss)
         self.turn_count = 0
         self.red_found = 0
+        self.current_team = "Red"
 
     def get_spymaster_board(self):
         """Spymaster sees everything."""
@@ -30,14 +31,21 @@ class CodenamesGame:
                 for w, i, r in zip(self.words, self.identities, self.revealed)]
 
     def get_operative_board(self):
-        """Operative only sees identities of revealed cards."""
-        return [{"word": w, "identity": i if r else "Unknown", "revealed": r} 
-                for w, i, r in zip(self.words, self.identities, self.revealed)]
+        """Operative only sees word + revealed status (no identities)."""
+        return [
+            {
+                "word": w,
+                "revealed": r
+            }
+            for w, r in zip(self.words, self.revealed)
+        ]
 
-    def get_unrevealed_targets(self):
-        """Helper for the Spymaster to know what words are left to guess."""
-        return [w for w, i, r in zip(self.words, self.identities, self.revealed) 
-                if i == 'Red' and not r]
+    def get_unrevealed_targets(self, team_color):
+        return [
+            item["word"]
+            for item in self.get_spymaster_board()
+            if (not item["revealed"] and item["identity"] == team_color)
+        ]
 
     def is_valid_clue(self, clue):
         """Checks if a clue is legal (not a visible word on the board)."""
@@ -46,6 +54,8 @@ class CodenamesGame:
             if not r and (clue_lower in w.lower() or w.lower() in clue_lower):
                 return False
         return True
+    def switch_team(self):
+        self.current_team = "Blue" if self.current_team == "Red" else "Red"
 
     def process_guess(self, guess_word):
         """
