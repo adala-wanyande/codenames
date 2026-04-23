@@ -3,6 +3,7 @@ from tokenize import group
 import ollama
 import google.generativeai as genai
 from dotenv import load_dotenv
+from prompt_toolkit import prompt
 from .base import SpymasterAgent, OperativeAgent
 from itertools import combinations
 import re
@@ -117,7 +118,7 @@ class LLMSpymaster(SpymasterAgent):
             if item['identity'] == 'Blue' and not item['revealed']
         ]
 
-        prompt = fprompt = f"""
+        prompt  = f"""
                             You are an expert Spymaster in Codenames.
 
                             TASK:
@@ -294,17 +295,19 @@ class LLMSpymaster(SpymasterAgent):
                     {'role': 'user', 'content': prompt}
                 ])
                 output = response['message']['content'].strip()
+                clue = output.split(",")[0].strip().lower()
 
             elif self.model_type == "gemini":
                 model = genai.GenerativeModel(self.model_name)
                 response = model.generate_content(prompt)
                 output = response.text.strip()
+                clue = output.split(",")[0].strip().lower()
+
 
             else:
                 raise ValueError(f"Unsupported model type: {self.model_type}")
 
-            clue = output.split(",")[0].strip().lower()
-            clue = clue.replace(".", "")
+            
             return clue, target_count
 
         except Exception as e:
@@ -326,7 +329,7 @@ class LLMOperative(OperativeAgent):
         
         prompt = f"""
         You are playing Codenames as the Operative.
-        
+
         TASK:
         Select exactly {num_guesses} words from AVAILABLE list that best match the clue.
 
