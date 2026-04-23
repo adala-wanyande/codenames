@@ -19,35 +19,52 @@ class LLMSpymaster(SpymasterAgent):
         self.model_name = model_name
 
     def give_clue(self, board_state, target_words):
-        print(f"[{self.name}] Thinking of a clue using {self.model_name}...")
+        print(f"[{self.name}] Analyzing board to group words...")
         
+        # Extract the dangerous words so the Spymaster knows what to avoid
+        assassin = [item['word'] for item in board_state if item['identity'] == 'Assassin' and not item['revealed']]
+        enemy_words = [item['word'] for item in board_state if item['identity'] == 'Blue' and not item['revealed']]
+
+        # EIRINI'S DOMAIN: The updated prompt instructing it to choose the number
         prompt = f"""
-        You are an expert Spymaster in the game Codenames.
-        Your target words are: {', '.join(target_words)}.
-        Provide ONE single word that connects these targets.
-        Respond WITH ONLY THE CLUE WORD AND NOTHING ELSE. No punctuation.
+        You are an expert Spymaster in Codenames.
+        Your goal is to link 2 or 3 of YOUR TARGET WORDS together with a single-word clue.
+        
+        YOUR TARGET WORDS: {', '.join(target_words)}
+        WORDS TO AVOID (Enemy/Assassin): {', '.join(enemy_words + assassin)}
+        
+        Decide which target words you want to link. 
+        Provide ONE single word as the clue, and the NUMBER of words it links.
+        
+        Respond EXACTLY in this format: CLUE, NUMBER
+        Example: Ocean, 2
         """
 
         try:
             if self.model_type == "ollama":
                 response = ollama.chat(model=self.model_name, messages=[
-                    {'role': 'system', 'content': 'You are a helpful AI.'},
+                    {'role': 'system', 'content': 'You are a helpful AI that strictly follows formatting rules.'},
                     {'role': 'user', 'content': prompt}
                 ])
-                clue = response['message']['content'].strip()
+                output = response['message']['content'].strip()
 
             elif self.model_type == "gemini":
                 model = genai.GenerativeModel(self.model_name)
                 response = model.generate_content(prompt)
-                clue = response.text.strip()
-                
+                output = response.text.strip()
             else:
                 raise ValueError(f"Unsupported model type: {self.model_type}")
 
-            return (clue, len(target_words))
+            # Parse the "CLUE, NUMBER" format
+            parts = output.split(',')
+            clue = parts[0].strip()
+            count = int(parts[1].strip())
+            
+            return (clue, count)
 
         except Exception as e:
-            print(f"❌ Error communicating with {self.model_name}: {e}")
+            # If the LLM messes up the formatting, fallback safely
+            print(f"❌ Spymaster formatting error: '{output}' | Error: {e}")
             return ("ERROR", 0)
 
 
