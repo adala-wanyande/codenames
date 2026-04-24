@@ -23,6 +23,7 @@ class CodenamesGame:
         self.winner = None  # 'Red' (Win) or 'Assassin' (Loss)
         self.turn_count = 0
         self.red_found = 0
+        self.blue_found = 0
         self.current_team = "Red"
 
     def get_spymaster_board(self):
@@ -80,6 +81,13 @@ class CodenamesGame:
                 self.is_game_over = True
                 self.winner = 'Red'
             return card_identity, True, self.is_game_over
+        
+        elif card_identity == 'Blue':
+            self.blue_found += 1
+            if self.blue_found == 8:
+                self.is_game_over = True
+                self.winner = 'Blue' # Opponent wins, but we can track it as a loss for the AI
+            return card_identity, False, self.is_game_over
             
         elif card_identity == 'Assassin':
             self.is_game_over = True
