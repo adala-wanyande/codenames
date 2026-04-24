@@ -122,7 +122,7 @@ class LLMSpymaster(SpymasterAgent):
                             You are an expert Spymaster in Codenames.
 
                             TASK:
-                            Group target words into {k} clusters (1–3 words each) that share a strong semantic link.
+                            Group target words into {k} clusters (1-8 words each) that share a strong semantic link. That can be described by a single word. You should aim to maximize the words per group you give.
 
                             TARGET:
                             {', '.join(target_words)}
@@ -132,7 +132,7 @@ class LLMSpymaster(SpymasterAgent):
 
                             RULES:
                             - Use ONLY target words
-                            - Each group: 1–3 words
+                            - Each group: 1–8 words
                             - Groups must be meaningfully related
                             - Avoid weak/abstract links
 
@@ -167,7 +167,7 @@ class LLMSpymaster(SpymasterAgent):
                     _, words = line.split(":", 1)
                     group = [w.strip() for w in words.split(",") if w.strip() in target_words]
                     
-                    if 1 <= len(group) <= 3:
+                    if 1 <= len(group) <= 8:
                         groups.append(tuple(sorted(group)))
 
             # deduplicate
@@ -189,6 +189,7 @@ class LLMSpymaster(SpymasterAgent):
         best_clue = None
         best_score = float("-inf")
         best_count = 0
+        best_combo = None
 
         assassin = tuple(sorted([
             item['word'] for item in board_state
@@ -205,7 +206,8 @@ class LLMSpymaster(SpymasterAgent):
 
         # fallback if LLM fails
         if not candidate_groups:
-            candidate_groups = list(combinations(target_words, 1))
+            print("⚠️ LLM failed to propose groups, using fallback.")
+            return "random", 1, ()
 
         for combo in candidate_groups:
             r = len(combo)
@@ -245,11 +247,11 @@ class LLMSpymaster(SpymasterAgent):
                 best_score = total_score
                 best_clue = clue
                 best_count = count
-
+                best_combo = combo
         if best_clue is None:
-            return "random", 1  # fallback
+            return "random", 1, ()
 
-        return best_clue, best_count
+        return best_clue, best_count, best_combo
 
     def give_clue(self, target_words, target_count, board_state, simulation = False):
         if simulation == False:
@@ -281,6 +283,7 @@ class LLMSpymaster(SpymasterAgent):
                 - ONE word only
                 - must NOT appear in any board word (substring included)
                 - no punctuation or spaces
+                - no emoji
                 - no compounds (e.g. "starrynight" if "night" exists is invalid)
                 - must be abstractly related to ALL targets
 
@@ -366,24 +369,19 @@ class LLMOperative(OperativeAgent):
             else:
                 raise ValueError(f"Unsupported model type: {self.model_type}")
 
-            # Clean up the AI's response into a Python list
-            guessed_words = [word.strip() for word in output.split(',')]
-            guessed_words = [w for w in guessed_words if w in available_words]
-            guessed_words = guessed_words[:num_guesses]
+            raw_words = [word.strip() for word in output.split(',')]
+
             cleaned = []
-            for w in guessed_words:
-                w = w.strip()
-
-                # remove punctuation + non-latin junk
+            for w in raw_words:
                 w = re.sub(r"[^a-zA-Z\s]", "", w)
-
                 w = w.strip().title()
 
-                if w in available_words:
-                    cleaned.append(w)
+                if w.lower() in [aw.lower() for aw in available_words]:
+                    matched = next(aw for aw in available_words if aw.lower() == w.lower())
+                    cleaned.append(matched)
 
-            guessed_words = cleaned[:num_guesses]
-            return guessed_words
+            return cleaned[:num_guesses]
+        
 
         except Exception as e:
             print(f"❌ Error communicating with {self.model_name}: {e}")
