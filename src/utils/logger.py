@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+import csv
+from datetime import datetime
 
 class TournamentLogger:
     def __init__(self, filename="tournament_results.csv"):
@@ -56,3 +58,39 @@ class TournamentLogger:
         print(f"Total Hallucinations: {df['Operative_Hallucinations'].sum()}")
         print(f"Total Assassin Hits: {df['Assassin_Hit'].sum()}")
         print("="*30)
+
+
+class invalid_clues:
+    def log_invalid_clue(clue, team, turn, targets, board_words):
+        """
+        Appends an invalid clue event to a global CSV file.
+        File is shared across runs and safely created if missing.
+        """
+
+        os.makedirs("data", exist_ok=True)
+        filepath = os.path.join("data", "spymaster_invalid_clues.csv")
+
+        file_exists = os.path.isfile(filepath)
+
+        with open(filepath, mode="a", newline="", encoding="utf-8") as file:
+            writer = csv.writer(file)
+
+            # Write header only once
+            if not file_exists:
+                writer.writerow([
+                    "timestamp",
+                    "turn",
+                    "team",
+                    "clue",
+                    "targets",
+                    "board_words"
+                ])
+
+            writer.writerow([
+                datetime.now().isoformat(),
+                turn,
+                team,
+                clue,
+                "|".join(targets),
+                "|".join(board_words)
+            ])
