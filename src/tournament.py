@@ -1,7 +1,10 @@
 from src.engine.game import CodenamesGame
-from src.agents.llm import LLMSpymaster, LLMOperative
+from src.agents.double_COT_SR_llm import Double_COT__SR_LLM_Spymaster
+from src.agents.operative_llm import LLMOperative
 from .main import SAMPLE_VOCAB, run_automated_game
 from src.utils.logger import TournamentLogger
+
+
 
 def init_metrics():
     return {
@@ -31,7 +34,7 @@ def run_tournament(n_games=2):
             model_name="qwen2.5"
         )
 
-        spymaster = LLMSpymaster(
+        spymaster = Double_COT__SR_LLM_Spymaster(
             name="Spymaster",
             model_type="ollama",
             model_name="qwen2.5",
@@ -41,6 +44,7 @@ def run_tournament(n_games=2):
         result = run_automated_game(game, spymaster, operative, aggregate)
 
         game_metrics = result["metrics"]
+        spymaster_type = result.get("spymaster_type", "unknown")
         hallucinations = result["hallucinations"]
         illegal_clues = result["illegal_clues"]
         finished_game = result["game"]
@@ -52,7 +56,8 @@ def run_tournament(n_games=2):
             operative_name=operative.name,
             game_engine=finished_game,
             hallucinations=hallucinations,
-            illegal_clues=illegal_clues
+            illegal_clues=illegal_clues,
+            spymaster_type=spymaster_type
         )
 
         # ✅ AGGREGATE
