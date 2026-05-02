@@ -8,57 +8,100 @@ class TournamentLogger:
         self.filename = os.path.join("data", "logs", filename)
         # Create the directories if they don't exist
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
-        
         self.match_data = []
+        self.turn_data = []
+    def log_turn(
+            self,
+            match_id,
+            turn,
+            team,
+            words_left,
+            clue,
+            count,
+            guesses,
+            correct,
+            wrong,
+            assassin,
+            invalid_clue,
+            guess_trace,
+            spymaster_type
+        ):
+        self.turn_data.append({
+            "Match_ID": match_id,
+            "Turn": turn,
+            "Team": team,
+            "Words_Left": words_left,
+            "Clue": clue,
+            "Clue_Count": count,
+            "Guesses": len(guesses),
+            "Correct_Guesses": correct,
+            "Wrong_Guesses": wrong,
+            "Assassin_Hit": assassin,
+            "Invalid_Clue": invalid_clue,
+            "Guess_Trace": guess_trace,
+            "Spymaster_Type": spymaster_type,
+            "Fallback": 1 if clue == "random" else 0
+        })
 
-    def log_match(self, match_id, spymaster_name, operative_name, game_engine, hallucinations, illegal_clues):
+    def log_match(self, match_id, spymaster_name, operative_name, game_engine, spymaster_type=None, shot=None):
         """
         Records all metrics for a single completed game.
         """
-        win = 1 if game_engine.winner == 'Red' else 0
-        assassin_hit = 1 if game_engine.winner == 'Assassin' else 0
+        win = game_engine.winner
         
         match_stats = {
             "Match_ID": match_id,
             "Spymaster": spymaster_name,
+            "Spymaster_Type": spymaster_type,
+            "Shot": shot,
             "Operative": operative_name,
             "Win": win,
             "Turns_Taken": game_engine.turn_count,
-            "Cards_Found": game_engine.red_found,
-            "Assassin_Hit": assassin_hit,
-            "Operative_Hallucinations": hallucinations,
-            "Spymaster_Illegal_Clues": illegal_clues
+            "Red_Cards_Found": getattr(game_engine, "red_found", 0),
+            "Blue_Cards_Found": getattr(game_engine, "blue_found", 0)
         }
         
         self.match_data.append(match_stats)
 
     def save_results(self):
-        """Saves the recorded data to a CSV file."""
-        df = pd.DataFrame(self.match_data)
-        
-        # If file exists, append without headers. Otherwise, write new file.
-        if os.path.exists(self.filename):
-            df.to_csv(self.filename, mode='a', header=False, index=False)
-        else:
-            df.to_csv(self.filename, index=False)
-            
-        print(f"\n📊 Results successfully saved to {self.filename}")
+        match_df = pd.DataFrame(self.match_data)
+        turn_df = pd.DataFrame(self.turn_data)
+
+        match_path = self.filename
+        turn_path = self.filename.replace(".csv", "_turns.csv")
+
+        match_df.to_csv(match_path, index=False)
+        turn_df.to_csv(turn_path, index=False)
+
+        print(f"\n📊 Match results saved to {match_path}")
+        print(f"📊 Turn-level results saved to {turn_path}")
         
     def print_summary(self):
-        """Prints a quick terminal summary of the tournament."""
         df = pd.DataFrame(self.match_data)
-        win_rate = df['Win'].mean() * 100
-        avg_turns = df[df['Win'] == 1]['Turns_Taken'].mean()
-        
+
+        # ✅ Convert to numeric
+        df["Red_Win"] = (df["Win"] == "Red").astype(int)
+
+        win_rate = df["Red_Win"].mean() * 100
+
+        avg_turns = df[df["Win"] == "Red"]["Turns_Taken"].mean()
+        if pd.isna(avg_turns):
+            avg_turns = 0
+
         print("\n" + "="*30)
         print("📈 TOURNAMENT SUMMARY 📈")
         print(f"Total Games Played: {len(df)}")
-        print(f"Win Rate: {win_rate:.1f}%")
-        print(f"Avg Turns (in wins): {avg_turns:.1f}")
-        print(f"Total Hallucinations: {df['Operative_Hallucinations'].sum()}")
-        print(f"Total Assassin Hits: {df['Assassin_Hit'].sum()}")
-        print("="*30)
+        print(f"Red Win Rate: {win_rate:.1f}%")
+        print(f"Avg Turns (Red wins): {avg_turns:.1f}")
 
+        # ✅ Safe columns (avoid crashes)
+        if "Operative_Hallucinations" in df.columns:
+            print(f"Total Hallucinations: {df['Operative_Hallucinations'].sum()}")
+
+        if "Assassin_Hit" in df.columns:
+            print(f"Total Assassin Hits: {df['Assassin_Hit'].sum()}")
+
+        print("="*30)
 
 class invalid_clues:
     def log_invalid_clue(clue, team, turn, targets, board_words):
