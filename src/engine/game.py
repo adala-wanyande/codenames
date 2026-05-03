@@ -1,4 +1,5 @@
 import random
+import re
 
 class CodenamesGame:
     def __init__(self, vocabulary):
@@ -22,9 +23,9 @@ class CodenamesGame:
         self.is_game_over = False
         self.winner = None  # 'Red' (Win) or 'Assassin' (Loss)
         self.turn_count = 0
+        self.current_team = "Red"
         self.red_found = 0
         self.blue_found = 0
-        self.current_team = "Red"
 
     def get_spymaster_board(self):
         """Spymaster sees everything."""
@@ -48,21 +49,51 @@ class CodenamesGame:
             if (not item["revealed"] and item["identity"] == team_color)
         ]
 
-    def is_valid_clue(self, clue):
-        """Checks if a clue is legal (not a visible word on the board)."""
-        clue_lower = clue.lower()
-        for w, r in zip(self.words, self.revealed):
-            if not r and (clue_lower in w.lower() or w.lower() in clue_lower):
+
+
+    def is_valid_clue(self, clue, board_state=None):
+        if not clue or not isinstance(clue, str):
+            return False
+
+        clue = clue.strip().lower()
+
+        # must be letters only
+        if not re.fullmatch(r"[a-z]+", clue):
+            return False
+
+        # build board words
+        if board_state is None:
+            board_words = [w.lower() for w in self.words]
+        else:
+            board_words = [item["word"].lower() for item in board_state if not item["revealed"]]
+
+        # exact match forbidden
+        for word in board_words:
+            if clue == word:
+                return False
+            if clue in word or word in clue:
+                return False
+        # ❌ NEW: root / morphological match check
+        for word in board_words:
+            if clue in word or word in clue:
+                return False
+            word_root = re.sub(r"(ing|ed|s)$", "", word)  # simple stemming
+            clue_root = re.sub(r"(ing|ed|s)$", "", clue)
+            if clue_root == word_root:
                 return False
         return True
     def switch_team(self):
         self.current_team = "Blue" if self.current_team == "Red" else "Red"
 
-    def process_guess(self, guess_word):
+    def process_guess(self, guess_word, team_color = "Red"):
         """
         Processes a single guess. 
         Returns a tuple: (identity_of_card, continue_turn, game_over)
         """
+        if team_color is None:
+            team_color = self.current_team
+        if self.is_game_over:
+            return None, False, True
         if guess_word not in self.words:
             return None, False, False # Invalid word, end turn
             
@@ -75,23 +106,26 @@ class CodenamesGame:
         card_identity = self.identities[idx]
         
         # Evaluate the rules based on the identity
-        if card_identity == 'Red':
-            self.red_found += 1
-            if self.red_found == 9:
+        if card_identity == team_color:
+            if team_color == "Red":
+                self.red_found +=1
+            else:
+                self.blue_found += 1
+            # check if ALL words of this team are revealed
+            remaining = [
+                i for i, (w, iden, rev) in enumerate(zip(self.words, self.identities, self.revealed))
+                if iden == team_color and not rev
+            ]
+
+            if len(remaining) == 0:
                 self.is_game_over = True
-                self.winner = 'Red'
+                self.winner = team_color
+
             return card_identity, True, self.is_game_over
-        
-        elif card_identity == 'Blue':
-            self.blue_found += 1
-            if self.blue_found == 8:
-                self.is_game_over = True
-                self.winner = 'Blue' # Opponent wins, but we can track it as a loss for the AI
-            return card_identity, False, self.is_game_over
             
         elif card_identity == 'Assassin':
             self.is_game_over = True
-            self.winner = 'Assassin'
+            self.winner = "Assassin"
             return card_identity, False, True
             
         else:

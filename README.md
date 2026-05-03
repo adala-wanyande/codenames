@@ -101,6 +101,23 @@ codenames/
 ├── .gitignore                  # Keeps our API keys and data safe
 └── requirements.txt            # Python dependencies
 ```
+### Prompt Variations
+In this repository, we attempt to compare the performance of agents with different prompts. The important traits we varied are the shots (examples) in prompts as well as the number of chain of thought (COT). In addition, we implement and additional agent that utilizes two chains of thoughts and evaluates the outputs with a utility function, effectively simulating stohastic rollouts, in order to improve performance.
+
+In order to run a game with zero (shot 0) or few shot (shot 1) prompting and only one chain of thought, run in the terminal from the main folder:
+
+**Mac/Linux:** `python3 -m src.main --spymaster_type single_cot --shot 1`  
+**Windows:** `python -m src.main --spymaster_type single_cot --shot 1`  
+
+Similarly, to run a game with zero (shot 0) or few shot (shot 1) prompting and two chains of thought, run in the terminal from the main folder:
+
+**Mac/Linux:** `python3 -m src.main --spymaster_type double_cot --shot 1`  
+**Windows:** `python -m src.main --spymaster_type double_cot --shot 1` 
+
+Lastly, to run a game with zero (shot 0) or few shot (shot 1) prompting, two chains of thought, and stohastic rollouts, run in the terminal from the main folder:
+
+**Mac/Linux:** `python3 -m src.main --spymaster_type double_cot_SR --shot 1`  
+**Windows:** `python -m src.main --spymaster_type double_cot_SR --shot 1` 
 
 ## Git Workflow (Important!)
 To avoid merge conflicts and breaking the code, **please do not push directly to the `main` branch.** 

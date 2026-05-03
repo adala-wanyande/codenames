@@ -1,5 +1,5 @@
 import pytest
-from src.tournament import run_tournament, init_metrics
+from src.tournament import run_tournament
 
 
 # ------------------------
@@ -27,65 +27,19 @@ def fake_game_result():
         })()
     }
 
+def make_dummy_game():
+    return fake_game_result()
 
 # ------------------------
 # Tests
 # ------------------------
 
-def test_no_double_counting(monkeypatch):
-    """Ensure metrics are not double-counted across games."""
 
-    def fake():
-        return fake_game_result()
-
-    monkeypatch.setattr("src.tournament.run_automated_game", lambda *a, **k: fake())
-
-    class DummyLogger:
-        def __init__(self): pass
-        def log_match(self, *a, **k): pass
-        def save_results(self): pass
-        def print_summary(self): pass
-
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
-
-    results = run_tournament(n_games=1)
-
-    # Should be exactly 1, not 2
-    assert results["wins"]["Red"] == 1
-
-def test_run_tournament_aggregates_correctly(monkeypatch):
-    """Tournament should correctly aggregate results across games."""
-
-    # Mock run_automated_game
-    monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *args, **kwargs: fake_game_result()
-    )
-
-    # Mock logger (no file writing)
-    class DummyLogger:
-        def __init__(self): pass
-        def log_match(self, *a, **k): pass
-        def save_results(self): pass
-        def print_summary(self): pass
-
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
-
-    results = run_tournament(n_games=3)
-
-    # Each game gives Red 1 win → total 3
-    assert results["wins"]["Red"] == 3
-    assert results["wins"]["Blue"] == 0
-
-    # Turns accumulate
-    assert results["turns"]["Red"] == 3
-    assert results["turns"]["Blue"] == 3
-
-def test_logger_receives_correct_data(monkeypatch):
+def test_logger_receives_valid_structure(monkeypatch):
     captured = []
 
     monkeypatch.setattr(
-        "src.tournament.run_automated_game",
+        "src.main.run_automated_game",
         lambda *a, **k: fake_game_result()
     )
 
@@ -102,44 +56,21 @@ def test_logger_receives_correct_data(monkeypatch):
 
     run_tournament(n_games=1)
 
-    assert len(captured) == 1
-    assert captured[0]["match_id"] == 0
-    assert captured[0]["hallucinations"] == 0
-    assert captured[0]["illegal_clues"] == 0
-    assert captured[0]["game_engine"].winner == "Red"
+    assert len(captured) == 6  # 6 configs
 
-def test_metrics_structure(monkeypatch):
-    monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *a, **k: fake_game_result()
-    )
+    for entry in captured:
+        assert "match_id" in entry
+        assert "game_engine" in entry
+        assert "spymaster_type" in entry
+        assert "shot" in entry
 
-    class DummyLogger:
-        def __init__(self): pass
-        def log_match(self, *a, **k): pass
-        def save_results(self): pass
-        def print_summary(self): pass
 
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
-
-    results = run_tournament(n_games=1)
-
-    expected_keys = {
-        "turns", "invalid_clues", "total_guesses",
-        "correct_guesses", "wrong_guesses",
-        "assassin_hits", "hallucinations", "wins"
-    }
-
-    assert set(results.keys()) == expected_keys
-
-def test_logger_called(monkeypatch):
-    """Logger should be called once per game."""
-
+def test_logger_called_correct_number_of_times(monkeypatch):
     calls = {"count": 0}
 
     monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *args, **kwargs: fake_game_result()
+        "src.main.run_automated_game",
+        lambda *a, **k: fake_game_result()
     )
 
     class DummyLogger:
@@ -153,9 +84,10 @@ def test_logger_called(monkeypatch):
 
     monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
 
-    run_tournament(n_games=5)
+    run_tournament(n_games=2)
 
-    assert calls["count"] == 5
+    # 6 configs × 2 games = 12
+    assert calls["count"] == 12
 
 
 def test_save_and_summary_called(monkeypatch):
@@ -188,11 +120,10 @@ def test_save_and_summary_called(monkeypatch):
 
 
 def test_zero_games(monkeypatch):
-    """Running tournament with 0 games should not crash."""
 
     monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *args, **kwargs: fake_game_result()
+        "src.main.run_automated_game",
+        lambda *a, **k: fake_game_result()
     )
 
     class DummyLogger:
@@ -205,26 +136,7 @@ def test_zero_games(monkeypatch):
 
     results = run_tournament(n_games=0)
 
-    # Should be empty metrics
-    assert results["wins"]["Red"] == 0
-    assert results["wins"]["Blue"] == 0
+    assert isinstance(results, dict)
+    assert results == {}
 
-def test_missing_fields_in_result(monkeypatch):
-    """Tournament should fail clearly if result format is wrong."""
-
-    monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *a, **k: {"metrics": {}}
-    )
-
-    class DummyLogger:
-        def __init__(self): pass
-        def log_match(self, *a, **k): pass
-        def save_results(self): pass
-        def print_summary(self): pass
-
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
-
-    with pytest.raises(KeyError):
-        run_tournament(n_games=1)
         

@@ -1,6 +1,10 @@
+import random
 from src.engine import game
 from src.engine.game import CodenamesGame
-from src.agents.llm import LLMSpymaster, LLMOperative
+from src.utils.logger import invalid_clues, TournamentLogger
+from src.utils.agent_config import build_spymaster
+import argparse
+
 
 
 SAMPLE_VOCAB = [
@@ -12,115 +16,265 @@ SAMPLE_VOCAB = [
     "Vampire", "Whale", "Zombie"
 ]
 
-def run_automated_game(game = None, spymaster = None, operative = None, metrics = None):
+def run_automated_game(
+    game=None,
+    spymaster=None,
+    operative=None,
+    metrics=None,   # optional runtime helper only
+    spymaster_type="single_cot",
+    shot=1,
+    logger=None
+):
     print("🤖 STARTING AI vs AI CODENAMES MATCH 🤖\n")
     if game is None:
-        from src.tournament import init_metrics
-        metrics = init_metrics()
         game = CodenamesGame(SAMPLE_VOCAB)
-    if operative is None:
-        operative = LLMOperative(name="Operative Qwen", model_type="ollama", model_name="qwen2.5")
-    if spymaster is None:
-        spymaster = LLMSpymaster(name="Spymaster Qwen", model_type="ollama", model_name="qwen2.5", operative=operative)
 
-    
-     # EIRINI'S REQUEST: Initial Spymaster Board Visualization
+    if operative is None:
+        from src.agents.operative_llm import LLMOperative
+        operative = LLMOperative(
+            name="Operative Qwen",
+            model_type="ollama",
+            model_name="qwen2.5"
+        )
+
+    if spymaster is None:
+        spymaster = build_spymaster(
+            spymaster_type=spymaster_type,
+            shot=shot,
+            operative=operative
+        )
+
+    match_id = f"{spymaster_type}_{shot}_{id(game)}"
+
     print("👀 INITIAL SPYMASTER BOARD 👀")
     game.display(view="spymaster")
+    print(f"🧠 Using spymaster: {spymaster_type} | shot={shot}")
 
     while not game.is_game_over:
         game.turn_count += 1
         print(f"\n{'='*10} TURN {game.turn_count} {'='*10}")
 
-        # ---------------- SPYMASTER ----------------
         team_color = game.current_team
-        metrics["turns"][team_color] += 1
         spymaster_board = game.get_spymaster_board()
         unrevealed_targets = game.get_unrevealed_targets(team_color)
 
-        print(f" Team to play: {team_color}")
-        print(f"Total targets left: {len(unrevealed_targets)}")
+        print(f"Team {team_color} has {len(unrevealed_targets)} targets left.")
         print(f"Unrevealed targets: {unrevealed_targets}")
 
-        clue, count, combo = spymaster.group_words(spymaster_board, unrevealed_targets)
-        spymaster_target_words = list(combo)
-        print(f"🎤 Spymaster says: '{clue}' for {count}. Targets: {spymaster_target_words}")
-        total_hallucinations = 0
-        total_illegal_clues = 0
-        if not game.is_valid_clue(clue):
-            metrics["invalid_clues"][team_color] += 1
-            game.switch_team()
-            total_illegal_clues += 1
+        # --------------------------------
+        # TURN RECORD (single source)
+        # --------------------------------
+        turn_record = {
+            "match_id": match_id,
+            "turn": game.turn_count,
+            "team": team_color,
+            "words_left": len(unrevealed_targets),
+            "clue": None,
+            "count": None,
+            "guesses": [],
+            "correct": 0,
+            "wrong": 0,
+            "assassin": 0,
+            "invalid_clue": 0,
+            "guess_trace": [],
+            "spymaster_type": spymaster_type
+        }
+
+        # -------------------------
+        # WIN CONDITION
+        # -------------------------
+        if len(unrevealed_targets) == 0:
+            game.is_game_over = True
+            game.winner = team_color
+            print(f"🏁 {team_color} wins (no targets left)")
+
+            if logger and hasattr(logger, "log_turn"):
+                logger.log_turn(**turn_record)
+
+            break
+
+        # -------------------------
+        # SPYMASTER
+        # -------------------------
+        if getattr(spymaster, "uses_internal_policy", False):
+            result = spymaster.group_words(
+                spymaster_board,
+                unrevealed_targets
+            )
+        else:
+            result = spymaster.give_clue(
+                spymaster_board,
+                unrevealed_targets,
+                shot=shot
+            )
+
+        if isinstance(result, tuple):
+            if len(result) == 3:
+                clue, count, target_words = result
+            elif len(result) == 2:
+                clue, count = result
+                target_words = unrevealed_targets[:count]
+            else:
+                clue, count = "random", 1
+                target_words = unrevealed_targets[:1]
+        else:
+            clue, count = "random", 1
+            target_words = unrevealed_targets[:1]
+
+        turn_record["clue"] = clue
+        turn_record["count"] = count
+
+        print(f"🎤 Spymaster says: {clue} for ({count})")
+
+        # -------------------------
+        # CLUE VALIDATION
+        # -------------------------
+        invalid_flag = int(not game.is_valid_clue(clue))
+        turn_record["invalid_clue"] = invalid_flag
+
+        if invalid_flag:
+            spymaster.invalid_clue.add(clue)
+
+            board_words = [item["word"] for item in spymaster_board]
+
+            invalid_clues.log_invalid_clue(
+                clue=clue,
+                team=team_color,
+                turn=game.turn_count,
+                targets=target_words,
+                board_words=board_words
+            )
+
             print("❌ Illegal clue. Turn skipped.")
+
+            if logger and hasattr(logger, "log_turn"):
+                logger.log_turn(**turn_record)
+
+            game.switch_team()
             continue
 
-        # ---------------- OPERATIVE ----------------
+        # -------------------------
+        # OPERATIVE
+        # -------------------------
         operative_board = game.get_operative_board()
-        print(f"🤔 Operative thinking on '{clue}' ({count} guesses allowed)")
+        guesses = operative.guess_words(operative_board, clue, count)
 
-        guessed_words = operative.guess_words(operative_board, clue, count)
-        print(f"🤔 Operative guesses: {guessed_words}")
+        if not guesses:
+            available = [
+                w["word"] for w in operative_board if not w["revealed"]
+            ]
+            guesses = [random.choice(available)]
 
-        guesses_left = count
+        turn_record["guesses"] = guesses
 
-        for guess in guessed_words:
-            if guesses_left <= 0:
-                break
+        print(f"💡 Operative guesses: {guesses}")
 
+        correct_team_hits = 0
+        incorrect_team_hits = 0
+        assassin_hit = 0
+        false_positive = 0
+
+        for guess in guesses[:count + 1]:
             print(f" -> Revealing '{guess}'...")
 
-            identity, continue_turn, game_over = game.process_guess(guess)
-            metrics["total_guesses"][team_color] += 1
+            identity, _, game_over = game.process_guess(
+                guess,
+                team_color
+            )
+
+            event = {
+                "guess": guess,
+                "identity": identity
+            }
+            turn_record["guess_trace"].append(event)
+
             print(f"    Result: {identity}")
-            if not identity:
-                total_hallucinations += 1
-                metrics["hallucinations"][team_color] += 1
-                print("    ❌ Invalid word (hallucination)")
-                break
-            if identity == "Assassin":
-                metrics["assassin_hits"][team_color] += 1
-                print("    💀 Assassin hit!")
-                break
-
-
 
             if identity == team_color:
-                metrics["correct_guesses"][team_color] += 1
-                guesses_left -= 1
                 print("    ✅ Correct guess → can continue")
-            else:
-                metrics["wrong_guesses"][team_color] += 1
-                print("    ❌ Wrong guess → turn ends")
+                correct_team_hits += 1
+                turn_record["correct"] = correct_team_hits
+
+                if guess not in target_words:
+                    false_positive += 1
+
+            elif identity is None:
+                print("❌ Hallucination")
                 break
 
-            # GAME OVER
+            elif identity == "Assassin":
+                opponent = "Blue" if team_color == "Red" else "Red"
+
+                game.winner = opponent
+                game.is_game_over = True
+
+                assassin_hit += 1
+                turn_record["assassin"] = 1
+
+                print(f"💀 Assassin hit! {opponent} wins!")
+
+                if logger and hasattr(logger, "log_turn"):
+                    logger.log_turn(**turn_record)
+
+                return {
+                    "spymaster_type": spymaster_type,
+                    "shot": shot,
+                    "game": game
+                }
+
+            else:
+                incorrect_team_hits += 1
+                turn_record["wrong"] = incorrect_team_hits
+                print("❌ Wrong guess → turn ends")
+                break
+
             if game_over:
                 break
 
-            if not continue_turn:
-                break
+        # -------------------------
+        # ALWAYS LOG TURN
+        # -------------------------
+        if logger and hasattr(logger, "log_turn"):
+            logger.log_turn(**turn_record)
 
-        # IMPORTANT: switch team AFTER full turn ends
+        if game.is_game_over:
+            break
+
         game.switch_team()
-            
-    # --- GAME OVER ---
-    print("\n" + "*"*30)
-    print("GAME OVER!")
 
-    if game.winner == 'Red':
-        metrics["wins"][game.winner] += 1
-        print(f"🏆 AI Team WINS in {game.turn_count} turns!")
-    else:
-        metrics["wins"][game.winner] += 1
-        print(f"💀 AI Team LOST")
-    print("*"*30)
+    print("\n" + "*" * 30)
+    print("GAME OVER")
+    print(f"The {game.winner} team wins in {game.turn_count} turns!")
+    print("*" * 30)
 
     return {
-        "metrics": metrics,
-        "hallucinations": total_hallucinations,
-        "illegal_clues": total_illegal_clues,
+        "spymaster_type": spymaster_type,
+        "shot": shot,
         "game": game
     }
-
 if __name__ == "__main__":
-    run_automated_game(game = None, spymaster = None, operative = None, metrics = None)
+    parser = argparse.ArgumentParser(description="Run Codenames AI simulation")
+
+    parser.add_argument(
+        "--spymaster_type",
+        type=str,
+        default="single_cot",
+        choices=["double_cot_SR", "single_cot", "double_cot"]
+    )
+
+    parser.add_argument(
+        "--shot",
+        type=int,
+        default=1,
+        choices=[0, 1, 2]
+    )
+
+    args = parser.parse_args()
+    run_automated_game(
+        game=None,
+        spymaster=None,
+        operative=None,
+        metrics=None,
+        spymaster_type=args.spymaster_type,
+        shot=args.shot
+    )

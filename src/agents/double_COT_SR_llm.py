@@ -4,9 +4,11 @@ import ollama
 import google.generativeai as genai
 from dotenv import load_dotenv
 from prompt_toolkit import prompt
-from .base import SpymasterAgent, OperativeAgent
-from itertools import combinations
+from .base import SpymasterAgent
 import re
+import json
+import random
+from .prompts import double_COT_prompt, operative_prompt
 
 # Load API keys safely from the .env file
 load_dotenv()
@@ -16,12 +18,20 @@ gemini_key = os.getenv("GEMINI_API_KEY")
 if gemini_key:
     genai.configure(api_key=gemini_key)
 
-class LLMSpymaster(SpymasterAgent):
+from src.agents.operative_llm import LLMOperative
+
+class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
     def __init__(self, name, model_type="ollama", model_name="qwen2.5", operative=None):
         super().__init__(name)
+        
         self.model_type = model_type.lower()
         self.model_name = model_name
-        self.operative = operative or LLMOperative(name=f"{name}'s Operative", model_type=model_type, model_name=model_name)
+        self.uses_internal_policy = True
+        self.invalid_clue = set()
+        if operative:
+            self.operative = operative 
+        else:
+            self.operative = LLMOperative("Default")
         self.clue_cache = {}
 
     def simulate_clue(self, clue, count, board_state):
@@ -104,7 +114,7 @@ class LLMSpymaster(SpymasterAgent):
 
         return 0  # neutral baseline
     
-    def propose_groups(self, board_state, target_words, k=10):
+    def propose_groups(self, board_state, target_words, k=10, shot = 0):
         """
         Ask LLM to propose k good groupings of target words.
         """
@@ -117,32 +127,18 @@ class LLMSpymaster(SpymasterAgent):
             item['word'] for item in board_state
             if item['identity'] == 'Blue' and not item['revealed']
         ]
-
-        prompt  = f"""
-                            You are an expert Spymaster in Codenames.
-
-                            TASK:
-                            Group target words into {k} clusters (1-8 words each) that share a strong semantic link. That can be described by a single word. You should aim to maximize the words per group you give.
-
-                            TARGET:
-                            {', '.join(target_words)}
-
-                            FORBIDDEN:
-                            {', '.join(enemy_words + assassin)}
-
-                            RULES:
-                            - Use ONLY target words
-                            - Each group: 1–8 words
-                            - Groups must be meaningfully related
-                            - Avoid weak/abstract links
-
-                            OUTPUT FORMAT (STRICT):
-                            group1: word, word
-                            group2: word, word, word
-                            group3: word, word
-                            """
-
-
+        neutral_words = [
+            item['word'] for item in board_state
+            if item['identity'] == 'Neutral' and not item['revealed']
+        ]
+        prompt = double_COT_prompt.propose_groups(
+            target_words=target_words,
+            enemy_words=enemy_words,
+            neutral_words=neutral_words,
+            assassin_words=assassin,
+            shot=shot
+        )
+        
         try:
             if self.model_type == "ollama":
                 response = ollama.chat(model=self.model_name, messages=[
@@ -159,21 +155,62 @@ class LLMSpymaster(SpymasterAgent):
             else:
                 raise ValueError
 
-            # --- Parse ---
             groups = []
 
-            for line in output.split("\n"):
-                if ":" in line:
-                    _, words = line.split(":", 1)
-                    group = [w.strip() for w in words.split(",") if w.strip() in target_words]
-                    
-                    if 1 <= len(group) <= 8:
-                        groups.append(tuple(sorted(group)))
+            # -------------------------
+            # 1. TRY JSON FIRST (BEST CASE)
+            # -------------------------
+            json_match = re.search(r"\{.*\}", output, re.DOTALL)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group(0))
 
-            # deduplicate
+                    # handle {"group": [...]}
+                    if "group" in data and isinstance(data["group"], list):
+                        group = [w for w in data["group"] if w in target_words]
+                        if 1 <= len(group) <= 8:
+                            groups.append(tuple(sorted(group)))
+
+                    # handle multiple groups in structured JSON
+                    for v in data.values():
+                        if isinstance(v, list):
+                            group = [w for w in v if w in target_words]
+                            if 1 <= len(group) <= 8:
+                                groups.append(tuple(sorted(group)))
+
+                except Exception as e:
+                    print("⚠️ JSON parse failed:", e)
+
+            # -------------------------
+            # 2. FALLBACK: TEXT PARSING
+            # -------------------------
+            for line in output.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # remove numbering like "1.", "-"
+                line = re.sub(r"^[\-\d\.\)\s]+", "", line)
+
+                # remove label like "Group 1:"
+                if ":" in line:
+                    line = line.split(":", 1)[1]
+
+                words = [w.strip() for w in line.split(",")]
+
+                group = [w for w in words if w in target_words]
+
+                if 1 <= len(group) <= 8:
+                    groups.append(tuple(sorted(group)))
+
+            # -------------------------
+            # 3. DEDUPLICATE
+            # -------------------------
             groups = list(set(groups))
 
             return groups[:k]
+
+
 
         except Exception as e:
             print(f"❌ Proposal error: {e}")
@@ -184,7 +221,7 @@ class LLMSpymaster(SpymasterAgent):
             if not any(set(g).issubset(set(other)) for other in groups if g != other):
                 filtered.append(g)
         return filtered
-    def group_words(self, board_state, target_words):
+    def group_words(self, board_state, target_words, k=10):
 
         best_clue = None
         best_score = float("-inf")
@@ -206,25 +243,33 @@ class LLMSpymaster(SpymasterAgent):
 
         # fallback if LLM fails
         if not candidate_groups:
-            print("⚠️ LLM failed to propose groups, using fallback.")
-            return "random", 1, ()
+            print("⚠️ Using heuristic fallback grouping")
+
+            shuffled = list(target_words)
+            random.shuffle(shuffled)
+
+            combo = tuple(shuffled[:1])  # at least 1 word
+
+            return "random", len(combo), combo
 
         for combo in candidate_groups:
+            if best_clue in self.invalid_clue:
+                continue
             r = len(combo)
             key = (
                 tuple(sorted(combo)),
                 tuple(sorted(item["word"] for item in board_state if not item["revealed"]))
             )
-
             if key in self.clue_cache:
                 clue = self.clue_cache[key]
                 count = r
             else:
                 clue, count = self.give_clue(combo, r, board_state, simulation=True)
-                    
-                if clue != "ERROR":
-                    self.clue_cache[key] = clue
 
+            # 🚫 NEW: reject reused invalid clues
+            if clue in self.invalid_clue:
+                continue
+           
             if clue == "ERROR":
                 continue
 
@@ -253,7 +298,8 @@ class LLMSpymaster(SpymasterAgent):
 
         return best_clue, best_count, best_combo
 
-    def give_clue(self, target_words, target_count, board_state, simulation = False):
+    def give_clue(self, target_words, target_count, board_state, simulation = False, shot = 0):
+        blacklist = list(self.clue_cache.values())[:20]
         if simulation == False:
             print(f"[{self.name}] Evaluating combo: {target_words}")
 
@@ -265,31 +311,16 @@ class LLMSpymaster(SpymasterAgent):
             item['word'] for item in board_state
             if item['identity'] == 'Blue' and not item['revealed']
         ]
-        revealed = [item['word'] for item in board_state if item['revealed']]
 
-        prompt = f"""
-                You are an expert Spymaster in Codenames.
-                
-                TASK:
-                Generate ONE clue word linking all TARGET words.
-
-                TARGET:
-                {', '.join(target_words)}
-
-                FORBIDDEN:
-                {', '.join(enemy_words + assassin + revealed)}
-
-                RULES:
-                - ONE word only
-                - must NOT appear in any board word (substring included)
-                - no punctuation or spaces
-                - no emoji
-                - no compounds (e.g. "starrynight" if "night" exists is invalid)
-                - must be abstractly related to ALL targets
-
-                OUTPUT:
-                single word only
-                """
+        prompt = double_COT_prompt.generate_clue(
+            group_words=target_words,
+            enemy_words=enemy_words,
+            neutral_words=[item['word'] for item in board_state if item['identity'] == 'Neutral' and not item['revealed']],
+            assassin_words=assassin,
+            board_state=board_state,
+            shot=shot,
+            banned_clues=list(self.invalid_clue) 
+        )
 
         try:
             if self.model_type == "ollama":
@@ -298,13 +329,14 @@ class LLMSpymaster(SpymasterAgent):
                     {'role': 'user', 'content': prompt}
                 ])
                 output = response['message']['content'].strip()
-                clue = output.split(",")[0].strip().lower()
+                # take FIRST token only, ignore numbers
+                clue = re.findall(r"[a-zA-Z]+", output)[0].lower()
 
             elif self.model_type == "gemini":
                 model = genai.GenerativeModel(self.model_name)
                 response = model.generate_content(prompt)
                 output = response.text.strip()
-                clue = output.split(",")[0].strip().lower()
+                clue = re.findall(r"[a-zA-Z]+", output)[0].lower()
 
 
             else:
@@ -316,73 +348,3 @@ class LLMSpymaster(SpymasterAgent):
         except Exception as e:
             print(f"❌ Spymaster error: {e}")
             return "ERROR", 0
-
-class LLMOperative(OperativeAgent):
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5"):
-        super().__init__(name)
-        self.model_type = model_type.lower()
-        self.model_name = model_name
-
-    def guess_words(self, board_state, clue_word, num_guesses, simulate = False):
-        if simulate == False:
-            print(f"[{self.name}] Analyzing clue '{clue_word}' for {num_guesses} words...")
-        
-        # Extract only the unrevealed words from the board
-        available_words = [item['word'] for item in board_state if not item['revealed']]
-        
-        prompt = f"""
-        You are playing Codenames as the Operative.
-
-        TASK:
-        Select exactly {num_guesses} words from AVAILABLE list that best match the clue.
-
-        CLUE:
-        {clue_word}
-
-        
-
-        AVAILABLE WORDS:
-        {', '.join(available_words)}
-
-        RULES:
-        - Choose ONLY from AVAILABLE WORDS
-        - No new words allowed
-        - No combining words
-        - Output must be exact matches
-
-        OUTPUT FORMAT:
-        word1, word2, word3
-        """
-        try:
-            if self.model_type == "ollama":
-                response = ollama.chat(model=self.model_name, messages=[
-                    {'role': 'system', 'content': 'You are a helpful AI playing a word game. You follow formatting rules strictly.'},
-                    {'role': 'user', 'content': prompt}
-                ])
-                output = response['message']['content'].strip()
-
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                output = response.text.strip()
-                
-            else:
-                raise ValueError(f"Unsupported model type: {self.model_type}")
-
-            raw_words = [word.strip() for word in output.split(',')]
-
-            cleaned = []
-            for w in raw_words:
-                w = re.sub(r"[^a-zA-Z\s]", "", w)
-                w = w.strip().title()
-
-                if w.lower() in [aw.lower() for aw in available_words]:
-                    matched = next(aw for aw in available_words if aw.lower() == w.lower())
-                    cleaned.append(matched)
-
-            return cleaned[:num_guesses]
-        
-
-        except Exception as e:
-            print(f"❌ Error communicating with {self.model_name}: {e}")
-            return []

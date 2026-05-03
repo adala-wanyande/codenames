@@ -1,73 +1,82 @@
 from src.engine.game import CodenamesGame
-from src.agents.llm import LLMSpymaster, LLMOperative
-from .main import SAMPLE_VOCAB, run_automated_game
+from src.agents.operative_llm import LLMOperative
+from src.utils.agent_config import build_spymaster
 from src.utils.logger import TournamentLogger
+from .main import SAMPLE_VOCAB, run_automated_game
 
-def init_metrics():
-    return {
-        "turns": {"Red": 0, "Blue": 0},
-        "invalid_clues": {"Red": 0, "Blue": 0},
-        "total_guesses": {"Red": 0, "Blue": 0},
-        "correct_guesses": {"Red": 0, "Blue": 0},
-        "wrong_guesses": {"Red": 0, "Blue": 0},
-        "assassin_hits": {"Red": 0, "Blue": 0},
-        "hallucinations": {"Red": 0, "Blue": 0},
-        "wins": {"Red": 0, "Blue": 0}
-    }
+AGENT_CONFIGS = [
+    {"spymaster_type": "single_cot", "shot": 0},
+    {"spymaster_type": "single_cot", "shot": 1},
+    {"spymaster_type": "double_cot", "shot": 0},
+    {"spymaster_type": "double_cot", "shot": 1},
+    {"spymaster_type": "double_cot_SR", "shot": 0},
+    {"spymaster_type": "double_cot_SR", "shot": 1},
+]
 
-def run_tournament(n_games=2):
 
+def run_tournament(n_games=10):
     logger = TournamentLogger()
-    aggregate = init_metrics()
 
-    for i in range(n_games):
-        print(f"🎮 Game {i+1}/{n_games}")
+    all_results = {}
 
-        game = CodenamesGame(SAMPLE_VOCAB)
+    for config in AGENT_CONFIGS:
+        spymaster_type = config["spymaster_type"]
+        shot = config["shot"]
 
-        operative = LLMOperative(
-            name="Operative",
-            model_type="ollama",
-            model_name="qwen2.5"
-        )
+        print(f"\n🚀 Running config: {spymaster_type} | shot={shot}")
 
-        spymaster = LLMSpymaster(
-            name="Spymaster",
-            model_type="ollama",
-            model_name="qwen2.5",
-            operative=operative
-        )
 
-        result = run_automated_game(game, spymaster, operative, aggregate)
+        for i in range(n_games):
+            print(f"🎮 Game {i+1}/{n_games}")
 
-        game_metrics = result["metrics"]
-        hallucinations = result["hallucinations"]
-        illegal_clues = result["illegal_clues"]
-        finished_game = result["game"]
+            game = CodenamesGame(SAMPLE_VOCAB)
 
-        # ✅ LOG MATCH
-        logger.log_match(
-            match_id=i,
-            spymaster_name=spymaster.name,
-            operative_name=operative.name,
-            game_engine=finished_game,
-            hallucinations=hallucinations,
-            illegal_clues=illegal_clues
-        )
+            operative = LLMOperative(
+                name="Operative",
+                model_type="ollama",
+                model_name="qwen2.5"
+            )
 
-        # ✅ AGGREGATE
-        for key in aggregate:
-            for team in aggregate[key]:
-                aggregate[key][team] += game_metrics[key][team]
+            spymaster = build_spymaster(
+                spymaster_type=spymaster_type,
+                shot=shot,
+                operative=operative
+            )
 
+            result = run_automated_game(
+                game=game,
+                spymaster=spymaster,
+                operative=operative,
+                spymaster_type=spymaster_type,
+                shot=shot,
+                logger=logger
+            )
+            game_obj = result.get("game")
+            if (
+                game_obj is not None
+                and getattr(game_obj, "is_game_over", False)
+                and getattr(game_obj, "winner", None) == "Assassin"
+            ):
+                print("skip")
+                break
+            finished_game = result["game"]
+
+            # ✅ LOG MATCH
+            logger.log_match(
+                match_id=f"{spymaster_type}_{shot}_{i}",
+                spymaster_name=spymaster.name,
+                operative_name=operative.name,
+                game_engine=finished_game,
+                spymaster_type=spymaster_type,
+                shot=shot
+            )
+
+         
     logger.save_results()
     logger.print_summary()
 
-    return aggregate
-
-
-
+    return all_results
 
 if __name__ == "__main__":
-    n_games = 2
+    n_games = 10
     results = run_tournament(n_games=n_games)

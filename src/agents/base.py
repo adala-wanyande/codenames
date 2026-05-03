@@ -17,3 +17,4 @@ class OperativeAgent(ABC):
     def guess_words(self, board_state, clue_word, num_guesses):
         """Returns a list of guessed words"""
         pass
+
