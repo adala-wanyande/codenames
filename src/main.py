@@ -23,7 +23,9 @@ def run_automated_game(
     metrics=None,   # optional runtime helper only
     spymaster_type="single_cot",
     shot=1,
-    logger=None
+    logger=None,
+    model_name="qwen2.5",
+    temperature=0.0
 ):
     print("🤖 STARTING AI vs AI CODENAMES MATCH 🤖\n")
     if game is None:
@@ -77,7 +79,10 @@ def run_automated_game(
             "assassin": 0,
             "invalid_clue": 0,
             "guess_trace": [],
-            "spymaster_type": spymaster_type
+            "spymaster_type": spymaster_type,
+            "shot": shot,
+            "model_name": model_name,
+            "temperature": temperature,
         }
 
         # -------------------------

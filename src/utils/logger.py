@@ -10,6 +10,30 @@ class TournamentLogger:
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
         self.match_data = []
         self.turn_data = []
+    @staticmethod
+    def _prompt_strategy(spymaster_type, shot):
+        mapping = {
+            ("word2vec",      0): "Baseline",
+            ("single_cot",    0): "Zero-Shot",
+            ("single_cot",    1): "Few-Shot",
+            ("double_cot",    0): "CoT",
+            ("double_cot",    1): "CoT+Few-Shot",
+            ("double_cot_SR", 0): "SR-CoT",
+            ("double_cot_SR", 1): "SR-CoT+Few-Shot",
+        }
+        return mapping.get((spymaster_type, shot), f"{spymaster_type}|{shot}")
+
+    @staticmethod
+    def _model_label(model_name):
+        labels = {
+            "word2vec":   "Word2Vec",
+            "qwen2.5":    "Qwen-2.5",
+            "qwen3":      "Qwen-3",
+            "mistral":    "Mistral",
+            "llama3":     "LLaMA-3",
+        }
+        return labels.get(model_name, model_name)
+
     def log_turn(
             self,
             match_id,
@@ -24,41 +48,51 @@ class TournamentLogger:
             assassin,
             invalid_clue,
             guess_trace,
-            spymaster_type
+            spymaster_type,
+            model_name="qwen2.5",
+            temperature=0.0,
+            shot=0,
         ):
         self.turn_data.append({
-            "Match_ID": match_id,
-            "Turn": turn,
-            "Team": team,
-            "Words_Left": words_left,
-            "Clue": clue,
-            "Clue_Count": count,
-            "Guesses": len(guesses),
+            "Match_ID":        match_id,
+            "Turn":            turn,
+            "Team":            team,
+            "Words_Left":      words_left,
+            "Clue":            clue,
+            "Clue_Count":      count,
+            "Guesses":         len(guesses),
             "Correct_Guesses": correct,
-            "Wrong_Guesses": wrong,
-            "Assassin_Hit": assassin,
-            "Invalid_Clue": invalid_clue,
-            "Guess_Trace": guess_trace,
-            "Spymaster_Type": spymaster_type,
-            "Fallback": 1 if clue == "random" else 0
+            "Wrong_Guesses":   wrong,
+            "Assassin_Hit":    assassin,
+            "Invalid_Clue":    invalid_clue,
+            "Guess_Trace":     guess_trace,
+            "Spymaster_Type":  spymaster_type,
+            "Shot":            shot,
+            "Prompt_Strategy": self._prompt_strategy(spymaster_type, shot),
+            "Model_Name":      model_name,
+            "Model_Label":     self._model_label(model_name),
+            "Temperature":     temperature,
+            "Fallback":        1 if clue == "random" else 0,
         })
 
-    def log_match(self, match_id, spymaster_name, operative_name, game_engine, spymaster_type=None, shot=None):
-        """
-        Records all metrics for a single completed game.
-        """
+    def log_match(self, match_id, spymaster_name, operative_name, game_engine,
+                  spymaster_type=None, shot=None, model_name="qwen2.5", temperature=0.0):
         win = game_engine.winner
-        
+
         match_stats = {
-            "Match_ID": match_id,
-            "Spymaster": spymaster_name,
-            "Spymaster_Type": spymaster_type,
-            "Shot": shot,
-            "Operative": operative_name,
-            "Win": win,
-            "Turns_Taken": game_engine.turn_count,
+            "Match_ID":        match_id,
+            "Spymaster":       spymaster_name,
+            "Spymaster_Type":  spymaster_type,
+            "Shot":            shot,
+            "Prompt_Strategy": self._prompt_strategy(spymaster_type, shot),
+            "Model_Name":      model_name,
+            "Model_Label":     self._model_label(model_name),
+            "Temperature":     temperature,
+            "Operative":       operative_name,
+            "Win":             win,
+            "Turns_Taken":     game_engine.turn_count,
             "Red_Cards_Found": getattr(game_engine, "red_found", 0),
-            "Blue_Cards_Found": getattr(game_engine, "blue_found", 0)
+            "Blue_Cards_Found":getattr(game_engine, "blue_found", 0),
         }
         
         self.match_data.append(match_stats)

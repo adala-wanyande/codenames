@@ -19,10 +19,11 @@ class Single_COT_LLMSpymaster(SpymasterAgent):
     No simulation, no grouping, no CoT.
     """
 
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5"):
+    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0):
         super().__init__(name)
         self.model_type = model_type.lower()
         self.model_name = model_name
+        self.temperature = temperature
         self.invalid_clue = set()
 
     def give_clue(self, board_state, target_words, shot = 0):
@@ -53,7 +54,7 @@ class Single_COT_LLMSpymaster(SpymasterAgent):
                 response = ollama.chat(model=self.model_name, messages=[
                     {"role": "system", "content": "You strictly follow output format."},
                     {"role": "user", "content": prompt}
-                ])
+                ], options={"temperature": self.temperature})
                 output = response["message"]["content"].strip()
 
             elif self.model_type == "gemini":

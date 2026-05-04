@@ -87,16 +87,44 @@ def test_winning_the_game():
     # Arrange
     game = CodenamesGame(TEST_VOCAB)
     red_words = [w for w, i in zip(game.words, game.identities) if i == 'Red']
-    
+
     # Act: Guess the first 8 red words
     for word in red_words[:8]:
         game.process_guess(word)
-        
+
     assert game.is_game_over == False # Game shouldn't be over yet
-    
+
     # Act: Guess the 9th red word
     identity, continue_turn, game_over = game.process_guess(red_words[8])
-    
+
     # Assert
     assert game_over == True
     assert game.winner == 'Red'
+
+
+# ---------------------------------------------------------------------------
+# board_data fixed-board replay
+# ---------------------------------------------------------------------------
+
+FIXED_WORDS = [f"Fixed{i}" for i in range(25)]
+FIXED_IDENTITIES = ['Red']*9 + ['Blue']*8 + ['Neutral']*7 + ['Assassin']*1
+
+def test_board_data_uses_fixed_words():
+    board_data = {"words": FIXED_WORDS[:], "identities": FIXED_IDENTITIES[:]}
+    game = CodenamesGame(TEST_VOCAB, board_data=board_data)
+    assert game.words == FIXED_WORDS
+
+def test_board_data_uses_fixed_identities():
+    board_data = {"words": FIXED_WORDS[:], "identities": FIXED_IDENTITIES[:]}
+    game = CodenamesGame(TEST_VOCAB, board_data=board_data)
+    assert game.identities == FIXED_IDENTITIES
+
+def test_board_data_ignores_vocabulary_for_layout():
+    board_data = {"words": FIXED_WORDS[:], "identities": FIXED_IDENTITIES[:]}
+    game = CodenamesGame([], board_data=board_data)
+    assert len(game.words) == 25
+
+def test_random_board_still_works_without_board_data():
+    game = CodenamesGame(TEST_VOCAB)
+    assert len(game.words) == 25
+    assert game.identities.count('Red') == 9

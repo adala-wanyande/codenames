@@ -9,10 +9,11 @@ from .prompts import operative_prompt
 
 
 class LLMOperative(OperativeAgent):
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5"):
+    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0):
         super().__init__(name)
         self.model_type = model_type.lower()
         self.model_name = model_name
+        self.temperature = temperature
 
     def guess_words(self, board_state, clue_word, num_guesses, simulate = False):
         if simulate == False:
@@ -27,7 +28,7 @@ class LLMOperative(OperativeAgent):
                 response = ollama.chat(model=self.model_name, messages=[
                     {'role': 'system', 'content': 'You are a helpful AI playing a word game. You follow formatting rules strictly.'},
                     {'role': 'user', 'content': prompt}
-                ])
+                ], options={"temperature": self.temperature})
                 output = response['message']['content'].strip()
 
             elif self.model_type == "gemini":

@@ -1,142 +1,194 @@
 import pytest
-from src.tournament import run_tournament
+from unittest.mock import MagicMock, patch
 
 
-# ------------------------
-# Helpers
-# ------------------------
+# ---------------------------------------------------------------------------
+# Shared fixtures
+# ---------------------------------------------------------------------------
 
-def fake_game_result():
-    return {
-        "metrics": {
-            "turns": {"Red": 1, "Blue": 1},
-            "invalid_clues": {"Red": 0, "Blue": 0},
-            "total_guesses": {"Red": 2, "Blue": 1},
-            "correct_guesses": {"Red": 2, "Blue": 1},
-            "wrong_guesses": {"Red": 0, "Blue": 0},
-            "assassin_hits": {"Red": 0, "Blue": 0},
-            "hallucinations": {"Red": 0, "Blue": 0},
-            "wins": {"Red": 1, "Blue": 0},
-        },
-        "hallucinations": 0,
-        "illegal_clues": 0,
-        "game": type("MockGame", (), {
-            "winner": "Red",
-            "turn_count": 5,
-            "red_found": 9
-        })()
+FAKE_BOARDS = [
+    {
+        "words": [f"W{i}" for i in range(25)],
+        "identities": ["Red"]*9 + ["Blue"]*8 + ["Neutral"]*7 + ["Assassin"]*1,
     }
-
-def make_dummy_game():
-    return fake_game_result()
-
-# ------------------------
-# Tests
-# ------------------------
+    for _ in range(10)
+]
 
 
-def test_logger_receives_valid_structure(monkeypatch):
-    captured = []
+def _make_fake_game(winner="Red", turns=5):
+    g = MagicMock()
+    g.winner = winner
+    g.turn_count = turns
+    g.red_found = 9
+    g.blue_found = 3
+    g.is_game_over = True
+    return g
 
-    monkeypatch.setattr(
-        "src.main.run_automated_game",
-        lambda *a, **k: fake_game_result()
-    )
 
-    class DummyLogger:
+def _fake_run_game(*args, **kwargs):
+    return {"game": _make_fake_game()}
+
+
+@pytest.fixture(autouse=True)
+def patch_tournament_deps(monkeypatch):
+    monkeypatch.setattr("src.tournament._load_benchmark_boards", lambda: FAKE_BOARDS)
+    monkeypatch.setattr("src.tournament.run_automated_game", _fake_run_game)
+    monkeypatch.setattr("src.tournament.build_operative", lambda **k: MagicMock(name="op"))
+    monkeypatch.setattr("src.tournament.build_spymaster", lambda **k: MagicMock(name="sm"))
+
+
+# ---------------------------------------------------------------------------
+# log_match call count
+# ---------------------------------------------------------------------------
+
+def test_log_match_called_once_per_game(monkeypatch):
+    from src.tournament import run_tournament, AGENT_CONFIGS
+    calls = []
+
+    class SpyLogger:
         def __init__(self): pass
-
-        def log_match(self, **kwargs):
-            captured.append(kwargs)
-
+        def log_match(self, **kwargs): calls.append(kwargs)
         def save_results(self): pass
         def print_summary(self): pass
 
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
+
+    n_games = 2
+    run_tournament(n_games=n_games)
+
+    assert len(calls) == len(AGENT_CONFIGS) * n_games
+
+
+def test_log_match_receives_required_fields(monkeypatch):
+    from src.tournament import run_tournament
+
+    captured = []
+
+    class SpyLogger:
+        def __init__(self): pass
+        def log_match(self, **kwargs): captured.append(kwargs)
+        def save_results(self): pass
+        def print_summary(self): pass
+
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
 
     run_tournament(n_games=1)
-
-    assert len(captured) == 6  # 6 configs
 
     for entry in captured:
         assert "match_id" in entry
         assert "game_engine" in entry
         assert "spymaster_type" in entry
         assert "shot" in entry
+        assert "model_name" in entry
+        assert "temperature" in entry
 
 
-def test_logger_called_correct_number_of_times(monkeypatch):
+# ---------------------------------------------------------------------------
+# Incremental save_results
+# ---------------------------------------------------------------------------
+
+def test_save_results_called_after_every_game(monkeypatch):
+    from src.tournament import run_tournament, AGENT_CONFIGS
+
+    save_calls = {"count": 0}
+
+    class SpyLogger:
+        def __init__(self): pass
+        def log_match(self, **kwargs): pass
+        def save_results(self): save_calls["count"] += 1
+        def print_summary(self): pass
+
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
+
+    n_games = 2
+    run_tournament(n_games=n_games)
+
+    assert save_calls["count"] == len(AGENT_CONFIGS) * n_games
+
+
+def test_print_summary_called_once(monkeypatch):
+    from src.tournament import run_tournament
+
+    summary_calls = {"count": 0}
+
+    class SpyLogger:
+        def __init__(self): pass
+        def log_match(self, **kwargs): pass
+        def save_results(self): pass
+        def print_summary(self): summary_calls["count"] += 1
+
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
+
+    run_tournament(n_games=1)
+
+    assert summary_calls["count"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Benchmark board usage
+# ---------------------------------------------------------------------------
+
+def test_uses_benchmark_boards(monkeypatch):
+    from src.tournament import run_tournament
+
+    boards_used = []
+
+    def fake_run_game(*args, **kwargs):
+        boards_used.append(kwargs.get("game"))
+        return {"game": _make_fake_game()}
+
+    monkeypatch.setattr("src.tournament.run_automated_game", fake_run_game)
+
+    class QuietLogger:
+        def __init__(self): pass
+        def log_match(self, **kwargs): pass
+        def save_results(self): pass
+        def print_summary(self): pass
+
+    monkeypatch.setattr("src.tournament.TournamentLogger", QuietLogger)
+
+    run_tournament(n_games=1)
+
+    assert len(boards_used) > 0
+
+
+def test_n_games_capped_at_board_count(monkeypatch):
+    from src.tournament import run_tournament, AGENT_CONFIGS
+
+    monkeypatch.setattr("src.tournament._load_benchmark_boards", lambda: FAKE_BOARDS[:2])
+
     calls = {"count": 0}
 
-    monkeypatch.setattr(
-        "src.main.run_automated_game",
-        lambda *a, **k: fake_game_result()
-    )
-
-    class DummyLogger:
+    class SpyLogger:
         def __init__(self): pass
-
-        def log_match(self, *args, **kwargs):
-            calls["count"] += 1
-
+        def log_match(self, **kwargs): calls["count"] += 1
         def save_results(self): pass
         def print_summary(self): pass
 
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
 
-    run_tournament(n_games=2)
+    run_tournament(n_games=999)
 
-    # 6 configs × 2 games = 12
-    assert calls["count"] == 12
+    assert calls["count"] == len(AGENT_CONFIGS) * 2
 
 
-def test_save_and_summary_called(monkeypatch):
-    """Logger should save and print summary exactly once."""
+# ---------------------------------------------------------------------------
+# n_games = 0
+# ---------------------------------------------------------------------------
 
-    monkeypatch.setattr(
-        "src.tournament.run_automated_game",
-        lambda *args, **kwargs: fake_game_result()
-    )
+def test_zero_games_runs_nothing(monkeypatch):
+    from src.tournament import run_tournament
 
-    calls = {"save": 0, "summary": 0}
+    calls = {"count": 0}
 
-    class DummyLogger:
+    class SpyLogger:
         def __init__(self): pass
-
-        def log_match(self, *a, **k): pass
-
-        def save_results(self):
-            calls["save"] += 1
-
-        def print_summary(self):
-            calls["summary"] += 1
-
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
-
-    run_tournament(n_games=2)
-
-    assert calls["save"] == 1
-    assert calls["summary"] == 1
-
-
-def test_zero_games(monkeypatch):
-
-    monkeypatch.setattr(
-        "src.main.run_automated_game",
-        lambda *a, **k: fake_game_result()
-    )
-
-    class DummyLogger:
-        def __init__(self): pass
-        def log_match(self, *a, **k): pass
+        def log_match(self, **kwargs): calls["count"] += 1
         def save_results(self): pass
         def print_summary(self): pass
 
-    monkeypatch.setattr("src.tournament.TournamentLogger", DummyLogger)
+    monkeypatch.setattr("src.tournament.TournamentLogger", SpyLogger)
 
-    results = run_tournament(n_games=0)
+    run_tournament(n_games=0)
 
-    assert isinstance(results, dict)
-    assert results == {}
-
-        
+    assert calls["count"] == 0

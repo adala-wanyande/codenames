@@ -1,387 +1,258 @@
 import os
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import seaborn as sns
-
+from scipy import stats
 
 LOG_DIR = "data/logs"
 FIG_DIR = "data/figures"
 
-def build_global_color_map(turn_df):
-    groups = sorted(
-        turn_df[["Spymaster_Type", "Shot"]]
-        .drop_duplicates()
-        .apply(tuple, axis=1)
-        .tolist()
-    )
+# Ordered prompt depth axis for all plots
+PROMPT_ORDER = ["Baseline", "Zero-Shot", "Few-Shot", "CoT", "CoT+Few-Shot", "SR-CoT", "SR-CoT+Few-Shot"]
 
-    palette = sns.color_palette("tab10", len(groups))
 
-    return {group: palette[i] for i, group in enumerate(groups)}
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 
 def load_data():
-    match_path = os.path.join(LOG_DIR, "tournament_results.csv")
-    turn_path = os.path.join(LOG_DIR, "tournament_results_turns.csv")
+    match_df = pd.read_csv(os.path.join(LOG_DIR, "tournament_results.csv"))
+    turn_df  = pd.read_csv(os.path.join(LOG_DIR, "tournament_results_turns.csv"))
 
-    match_df = pd.read_csv(match_path)
-    turn_df = pd.read_csv(turn_path)
+    # Back-fill columns that older CSVs may not have
+    for col, default in [("Model_Name", "qwen2.5"), ("Model_Label", "Qwen-2.5"),
+                         ("Temperature", 0.0), ("Prompt_Strategy", "Unknown"),
+                         ("Shot", 0)]:
+        if col not in match_df.columns:
+            match_df[col] = default
+        if col not in turn_df.columns:
+            turn_df[col] = default
 
+    match_df["Red_Win"] = (match_df["Win"] == "Red").astype(int)
     return match_df, turn_df
 
 
-# -------------------------
-# 1. WIN RATE ANALYSIS
-# -------------------------
-def plot_win_rates(match_df):
-    plt.figure()
+# ---------------------------------------------------------------------------
+# Paper Plot 1 — Win Rate & Game Length by Agent (grouped bar)
+# ---------------------------------------------------------------------------
 
-    win_rates = match_df.groupby("Spymaster_Type")["Win"].apply(
-        lambda x: (x == "Red").mean()  # adjust if Red is not "win"
+def plot_win_rate_and_length(match_df):
+    """
+    Side-by-side grouped bar: Win Rate (%) and Avg Turns to Win,
+    grouped by Prompt_Strategy, coloured by Model_Label.
+    """
+    agg = (
+        match_df.groupby(["Prompt_Strategy", "Model_Label"])
+        .agg(Win_Rate=("Red_Win", "mean"), Avg_Turns=("Turns_Taken", "mean"), N=("Red_Win", "count"))
+        .reset_index()
     )
 
-    win_rates.plot(kind="bar")
-    plt.title("Win Rate by Spymaster Type")
-    plt.ylabel("Win Rate")
-    plt.xticks(rotation=45)
+    strategies  = [s for s in PROMPT_ORDER if s in agg["Prompt_Strategy"].unique()]
+    models      = sorted(agg["Model_Label"].unique())
+    palette     = sns.color_palette("tab10", len(models))
+    model_color = dict(zip(models, palette))
 
-    save_path = os.path.join(FIG_DIR, "win_rates.png")
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-# -------------------------
-# 2. AVERAGE GAME LENGTH
-# -------------------------
-def plot_game_dynamics(match_df, turn_df, color_map):
+    x     = range(len(strategies))
+    width = 0.8 / max(len(models), 1)
+
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
-    # -------------------------
-    # LEFT: Words Left over turns
-    # -------------------------
-    turn_base = (
-        turn_df
-        .groupby(["Spymaster_Type", "Shot", "Turn"])["Words_Left"]
-        .mean()
-        .reset_index()
-    )
+    for i, model in enumerate(models):
+        sub    = agg[agg["Model_Label"] == model].set_index("Prompt_Strategy")
+        offset = (i - len(models) / 2 + 0.5) * width
+        wins   = [sub.loc[s, "Win_Rate"] if s in sub.index else 0 for s in strategies]
+        turns  = [sub.loc[s, "Avg_Turns"] if s in sub.index else 0 for s in strategies]
+        xpos   = [xi + offset for xi in x]
+        axes[0].bar(xpos, wins,  width=width * 0.9, color=model_color[model], label=model)
+        axes[1].bar(xpos, turns, width=width * 0.9, color=model_color[model], label=model)
 
-    for (spymaster, shot), group in turn_base.groupby(["Spymaster_Type", "Shot"]):
-        group = group.sort_values("Turn")
-        color = color_map[(spymaster, shot)]
+    for ax, title, ylabel in [
+        (axes[0], "Win Rate (Red team) by Prompt Strategy", "Win Rate"),
+        (axes[1], "Average Game Length by Prompt Strategy",  "Avg Turns"),
+    ]:
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(strategies, rotation=20, ha="right", fontsize=9)
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
 
-        axes[0].plot(
-            group["Turn"],
-            group["Words_Left"],
-            color=color,
-            label=f"{spymaster}|{shot}"
-        )
+    axes[0].set_ylim(0, 1.05)
+    axes[0].axhline(0.5, color="grey", linestyle="--", linewidth=0.8, label="50% baseline")
+    axes[0].yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1))
 
-    axes[0].set_title("Words Left over Turns")
-    axes[0].set_xlabel("Turn")
-    axes[0].set_ylabel("Words Left")
-
-    # -------------------------
-    # RIGHT: Avg Game Length
-    # -------------------------
-    pivot = (
-        match_df
-        .groupby(["Spymaster_Type", "Shot"])["Turns_Taken"]
-        .mean()
-        .reset_index()
-    )
-
-    for (spymaster, shot), group in pivot.groupby(["Spymaster_Type", "Shot"]):
-        color = color_map[(spymaster, shot)]
-        axes[1].bar(
-            f"{spymaster}|{shot}",
-            group["Turns_Taken"].values[0],
-            color=color
-        )
-
-    axes[1].set_title("Average Game Length")
-    axes[1].set_ylabel("Turns")
-
-    # -------------------------
-    # FIXED LEGEND (OUTSIDE PLOTS)
-    # -------------------------
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=4,
-        bbox_to_anchor=(0.5, -0.15)  # push below figure
+    fig.legend(handles, labels, loc="lower center", ncol=len(models) + 1,
+               bbox_to_anchor=(0.5, -0.08), fontsize=9)
+    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    _save("win_rate_by_strategy.png")
+
+
+# ---------------------------------------------------------------------------
+# Paper Plot 2 — Avg Turns to Win vs. Prompt Depth (boxplot)
+# ---------------------------------------------------------------------------
+
+def plot_turns_vs_prompt_depth(match_df):
+    """
+    Boxplot: distribution of game length across prompt strategies.
+    Answers: does more prompt depth make games faster or slower?
+    """
+    strategies = [s for s in PROMPT_ORDER if s in match_df["Prompt_Strategy"].unique()]
+    if len(strategies) < 2:
+        print("  Skipping turns_vs_prompt_depth — need ≥2 prompt strategies in data.")
+        return
+
+    plt.figure(figsize=(10, 5))
+    sns.boxplot(
+        data=match_df,
+        x="Prompt_Strategy", y="Turns_Taken",
+        order=strategies,
+        palette="tab10",
+        width=0.5,
     )
+    plt.title("Game Length Distribution by Prompt Depth")
+    plt.xlabel("Prompt Strategy")
+    plt.ylabel("Turns to Finish")
+    plt.xticks(rotation=20, ha="right", fontsize=9)
+    plt.tight_layout()
+    _save("turns_vs_prompt_depth.png")
 
-    # reserve space at top for legend
-    plt.tight_layout(rect=[0, 0.05, 1, 1])  # leave space at bottom
 
-    save_path = os.path.join(FIG_DIR, "game_dynamics.png")
-    plt.savefig(save_path, bbox_inches="tight")
-    plt.close()
-def plot_false_positives(turn_df):
-    plt.figure()
+# ---------------------------------------------------------------------------
+# Paper Plot 3 — Invalid Clue / Fallback Rate vs. Prompt Depth (bar)
+# ---------------------------------------------------------------------------
 
-    fp = (
-        turn_df
-        .groupby(["Spymaster_Type", "Shot"])["Invalid_Clue"]
-        .mean()
+def plot_invalid_rate_vs_prompt_depth(turn_df):
+    """
+    Grouped bar: Invalid Clue Rate and Fallback Rate by Prompt Strategy.
+    Answers: does chain-of-thought improve rule compliance?
+    """
+    strategies = [s for s in PROMPT_ORDER if s in turn_df["Prompt_Strategy"].unique()]
+
+    agg = (
+        turn_df.groupby("Prompt_Strategy")
+        .agg(Invalid_Rate=("Invalid_Clue", "mean"), Fallback_Rate=("Fallback", "mean"))
+        .reindex(strategies)
         .reset_index()
     )
 
-    groups = list(fp[["Spymaster_Type", "Shot"]].apply(tuple, axis=1))
-    color_map = build_global_color_map(turn_df)
+    x     = range(len(strategies))
+    width = 0.35
 
-    for _, row in fp.iterrows():
-        key = (row["Spymaster_Type"], row["Shot"])
-        plt.bar(
-            str(key),
-            row["Invalid_Clue"],
-            color=color_map[key]
-        )
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar([xi - width / 2 for xi in x], agg["Invalid_Rate"],  width=width, label="Invalid Clue Rate",  color=sns.color_palette("tab10")[0])
+    ax.bar([xi + width / 2 for xi in x], agg["Fallback_Rate"], width=width, label="Fallback Rate", color=sns.color_palette("tab10")[1])
 
-    plt.title("Invalid Clue Rate by Agent")
-    plt.ylabel("Rate")
-    plt.xticks(rotation=45)
-
-    save_path = os.path.join(FIG_DIR, "false_positive_rate.png")
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(strategies, rotation=20, ha="right", fontsize=9)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1))
+    ax.set_title("Rule Compliance: Invalid Clue & Fallback Rate by Prompt Depth")
+    ax.set_ylabel("Rate (fraction of turns)")
+    ax.legend()
     plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-
-def extract_shot_and_type(turn_df):
-    def parse(match_id):
-        parts = match_id.split("_")
-
-        if len(parts) < 3:
-            return pd.Series([None, None])
-
-        shot = int(parts[-2])                     # always second-to-last
-        spymaster_type = "_".join(parts[:-2])     # everything before
-
-        return pd.Series([spymaster_type, shot])
-
-    turn_df[["Spymaster_Type", "Shot"]] = turn_df["Match_ID"].apply(parse)
-
-    return turn_df
+    _save("invalid_rate_vs_prompt_depth.png")
 
 
+# ---------------------------------------------------------------------------
+# Paper Plot 4 — Assassin Hit Rate & Invalid Clue Rate by Model (grouped bar)
+# ---------------------------------------------------------------------------
 
-
-def make_agent_key(spymaster, shot):
-    return f"{spymaster}|{shot}"
-def plot_clue_vs_guesses(turn_df, color_map):
-    base = (
-        turn_df
-        .groupby(["Spymaster_Type", "Shot", "Turn"])
-        .mean(numeric_only=True)
-        .reset_index()
-    )
-
-    groups = list(base.groupby(["Spymaster_Type", "Shot"]).groups.keys())
-    color_map = color_map
-
-    plt.figure()
-
-    for (spymaster, shot), group in base.groupby(["Spymaster_Type", "Shot"]):
-        group = group.sort_values("Turn")
-        color = color_map[(spymaster, shot)]
-
-        label = f"{spymaster} | shot={shot}"
-
-        # clue
-        plt.plot(
-            group["Turn"],
-            group["Clue_Count"],
-            marker="o",
-            linestyle="-",
-            color=color,
-            label=label
-        )
-
-        # guesses (NO legend entry)
-        plt.plot(
-            group["Turn"],
-            group["Guesses"],
-            marker="x",
-            linestyle="--",
-            color=color,
-            label="_nolegend_"
-        )
-
-    plt.title("Clue Count vs Nb of Guesses")
-    plt.xlabel("Turn")
-    plt.ylabel("Count")
-    plt.legend(ncol=3, fontsize=8)
-
-    save_path = os.path.join(FIG_DIR, "clue_vs_guesses_over_turns.png")
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-
-def plot_guess_quality(turn_df, color_map):
-    base = (
-        turn_df
-        .groupby(["Spymaster_Type", "Shot", "Turn"])
-        .mean(numeric_only=True)
-        .reset_index()
-    )
-
-    groups = list(base.groupby(["Spymaster_Type", "Shot"]).groups.keys())
-    color_map = color_map
-
-    plt.figure()
-
-    for (spymaster, shot), group in base.groupby(["Spymaster_Type", "Shot"]):
-        group = group.sort_values("Turn")
-        color = color_map[(spymaster, shot)]
-
-        label = f"{spymaster} | shot={shot}"
-
-        # correct
-        plt.plot(
-            group["Turn"],
-            group["Correct_Guesses"],
-            marker="^",
-            linestyle="-",
-            color=color,
-            label=label
-        )
-
-        # wrong (NO legend entry)
-        plt.plot(
-            group["Turn"],
-            group["Wrong_Guesses"],
-            marker="x",
-            linestyle="--",
-            color=color,
-            label="_nolegend_"
-        )
-
-    plt.title("Correct vs Wrong guesses")
-    plt.xlabel("Turn")
-    plt.ylabel("Count")
-    plt.legend(ncol=3, fontsize=8)
-
-    save_path = os.path.join(FIG_DIR, "guess_quality_over_turns.png")
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-def plot_assassin_suite(turn_df, color_map):
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-
-    # -------------------------
-    # 1. HIT RATE PER GAME
-    # -------------------------
+def plot_safety_by_model(match_df, turn_df):
+    """
+    Grouped bar: Assassin Hit Rate and Invalid Clue Rate per model.
+    Answers: which model architecture is safest?
+    """
+    # Assassin hit rate per match, then averaged per model
     match_assassin = (
-        turn_df
-        .groupby(["Match_ID", "Spymaster_Type", "Shot"])["Assassin_Hit"]
-        .max()
-        .reset_index()
+        turn_df.groupby(["Match_ID", "Model_Label"])["Assassin_Hit"]
+        .max().reset_index()
     )
+    assassin_rate = match_assassin.groupby("Model_Label")["Assassin_Hit"].mean()
+    invalid_rate  = turn_df.groupby("Model_Label")["Invalid_Clue"].mean()
 
-    hit_rate = (
-        match_assassin
-        .groupby(["Spymaster_Type", "Shot"])["Assassin_Hit"]
-        .mean()
-        .reset_index()
-    )
+    models = sorted(set(assassin_rate.index) | set(invalid_rate.index))
+    x      = range(len(models))
+    width  = 0.35
 
-    x_labels = []
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.bar([xi - width / 2 for xi in x],
+           [assassin_rate.get(m, 0) for m in models],
+           width=width, label="Assassin Hit Rate", color=sns.color_palette("tab10")[3])
+    ax.bar([xi + width / 2 for xi in x],
+           [invalid_rate.get(m, 0) for m in models],
+           width=width, label="Invalid Clue Rate", color=sns.color_palette("tab10")[1])
 
-    for (spymaster, shot), group in hit_rate.groupby(["Spymaster_Type", "Shot"]):
-        color = color_map[(spymaster, shot)]
-        label = f"{spymaster}|{shot}"
-        x_labels.append(label)
-
-        axes[0].bar(
-            label,
-            group["Assassin_Hit"].values[0],
-            color=color
-        )
-
-    axes[0].set_title("Assassin Hit Rate")
-    axes[0].tick_params(axis='x', rotation=45)   # ✅ FIX HERE
-
-    # -------------------------
-    # 2. AVERAGE TURN HIT
-    # -------------------------
-    assassin_turns = (
-        turn_df[turn_df["Assassin_Hit"] == 1]
-        .groupby(["Match_ID", "Spymaster_Type", "Shot"])["Turn"]
-        .min()
-        .reset_index()
-    )
-
-    avg_turn = (
-        assassin_turns
-        .groupby(["Spymaster_Type", "Shot"])["Turn"]
-        .mean()
-        .reset_index()
-    )
-
-    for (spymaster, shot), group in avg_turn.groupby(["Spymaster_Type", "Shot"]):
-        color = color_map[(spymaster, shot)]
-
-        axes[1].bar(
-            f"{spymaster}|{shot}",
-            group["Turn"].values[0],
-            color=color
-        )
-
-    axes[1].set_title("Avg Turn of Assassin Hit")
-    axes[1].tick_params(axis='x', rotation=45)   # ✅ FIX HERE
-
-    # -------------------------
-    # 3. DISTRIBUTION (unchanged)
-    # -------------------------
-    for (spymaster, shot), group in assassin_turns.groupby(["Spymaster_Type", "Shot"]):
-        color = color_map[(spymaster, shot)]
-
-        if group["Turn"].nunique() < 2:
-            continue
-
-        sns.kdeplot(
-            data=group,
-            x="Turn",
-            ax=axes[2],
-            fill=True,
-            alpha=0.25,
-            color=color,
-            label=f"{spymaster}|{shot}",
-            warn_singular=False
-        )
-
-    axes[2].set_title("Assassin Turn Distribution")
-
-    plt.legend()
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(models, fontsize=10)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1))
+    ax.set_title("Safety Metrics by Model Architecture")
+    ax.set_ylabel("Rate")
+    ax.legend()
     plt.tight_layout()
+    _save("safety_by_model.png")
 
-    save_path = os.path.join(FIG_DIR, "assassin_suite.png")
-    plt.savefig(save_path)
+
+# ---------------------------------------------------------------------------
+# Statistical significance tests
+# ---------------------------------------------------------------------------
+
+def run_statistical_tests(match_df):
+    groups = {
+        label: group["Red_Win"].values
+        for label, group in match_df.groupby("Prompt_Strategy")
+    }
+
+    print("\n" + "=" * 55)
+    print("Statistical Significance Tests")
+    print("=" * 55)
+
+    if "Baseline" in groups:
+        baseline = groups["Baseline"]
+        llm_wins = match_df[match_df["Prompt_Strategy"] != "Baseline"]["Red_Win"].values
+        if len(llm_wins) > 0 and len(baseline) > 0:
+            t, p = stats.ttest_ind(baseline, llm_wins, equal_var=False)
+            sig = "*" if p < 0.05 else "n.s."
+            print(f"T-test  Baseline vs all LLM:  t={t:.3f},  p={p:.4f}  {sig}")
+
+    anova_groups = [v for v in groups.values() if len(v) > 1]
+    if len(anova_groups) >= 2:
+        f, p = stats.f_oneway(*anova_groups)
+        sig = "*" if p < 0.05 else "n.s."
+        print(f"ANOVA   all prompt strategies: F={f:.3f},  p={p:.4f}  {sig}")
+
+    print("=" * 55)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _save(filename):
+    path = os.path.join(FIG_DIR, filename)
+    plt.savefig(path, bbox_inches="tight", dpi=150)
     plt.close()
-# -------------------------
-# MAIN ENTRY
-# -------------------------
+    print(f"  Saved {filename}")
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 def run_visualization():
     os.makedirs(FIG_DIR, exist_ok=True)
-
     match_df, turn_df = load_data()
-    turn_df = extract_shot_and_type(turn_df)
+    print(f"Loaded {len(match_df)} matches, {len(turn_df)} turns.")
+    print(f"Prompt strategies: {sorted(match_df['Prompt_Strategy'].unique())}")
+    print(f"Models:            {sorted(match_df['Model_Label'].unique())}")
+    print("\nGenerating plots...")
 
-    color_map = build_global_color_map(turn_df)
+    plot_win_rate_and_length(match_df)
+    plot_turns_vs_prompt_depth(match_df)
+    plot_invalid_rate_vs_prompt_depth(turn_df)
+    plot_safety_by_model(match_df, turn_df)
+    run_statistical_tests(match_df)
 
-    print("📊 Loaded datasets:")
-    print("Match rows:", len(match_df))
-    print("Turn rows:", len(turn_df))
+    print(f"\nAll figures saved to {FIG_DIR}/")
 
-    print("📈 Generating plots...")
 
-    plot_game_dynamics(match_df, turn_df, color_map)
-    plot_guess_quality(turn_df, color_map)
-    plot_false_positives(turn_df)
-    plot_clue_vs_guesses(turn_df, color_map)
-    plot_assassin_suite(turn_df, color_map)
-
-    print(f"✅ All figures saved to {FIG_DIR}/")
 if __name__ == "__main__":
     run_visualization()
