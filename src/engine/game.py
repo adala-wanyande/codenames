@@ -2,20 +2,22 @@ import random
 import re
 
 class CodenamesGame:
-    def __init__(self, vocabulary):
+    def __init__(self, vocabulary, board_data=None):
         """
         Initializes a new game of Codenames.
-        Assumes the AI agents are playing as the 'Red' team (going first).
+        Pass board_data={"words": [...], "identities": [...]} to replay a fixed board
+        from the benchmark set instead of sampling randomly.
         """
-        if len(vocabulary) < 25:
-            raise ValueError("Vocabulary must have at least 25 words.")
-            
-        self.words = random.sample(vocabulary, 25)
-        
-        # Standard rules: 9 targets (Red), 8 opponents (Blue), 7 neutral, 1 assassin
-        identities = ['Red']*9 + ['Blue']*8 + ['Neutral']*7 + ['Assassin']*1
-        random.shuffle(identities)
-        self.identities = identities
+        if board_data is not None:
+            self.words = board_data["words"]
+            self.identities = board_data["identities"]
+        else:
+            if len(vocabulary) < 25:
+                raise ValueError("Vocabulary must have at least 25 words.")
+            self.words = random.sample(vocabulary, 25)
+            identities = ['Red']*9 + ['Blue']*8 + ['Neutral']*7 + ['Assassin']*1
+            random.shuffle(identities)
+            self.identities = identities
         
         self.revealed = [False] * 25
         
