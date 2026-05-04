@@ -22,10 +22,11 @@ class Double_COT_LLMSpymaster(SpymasterAgent):
     2. Generate clue ONLY from that subset
     """
 
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5"):
+    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0):
         super().__init__(name)
         self.model_type = model_type.lower()
         self.model_name = model_name
+        self.temperature = temperature
         self.invalid_clue = set()
 
     # -------------------------
@@ -140,7 +141,8 @@ class Double_COT_LLMSpymaster(SpymasterAgent):
                     messages=[
                         {"role": "system", "content": "Return ONLY valid output."},
                         {"role": "user", "content": prompt}
-                    ]
+                    ],
+                    options={"temperature": self.temperature}
                 )
                 return response["message"]["content"].strip()
 

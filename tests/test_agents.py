@@ -337,3 +337,67 @@ def test_simulation_stops_on_wrong(monkeypatch):
 
     assert result["correct"] == 0
     assert result["wrong"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Temperature parameter propagation
+# ---------------------------------------------------------------------------
+
+def test_operative_stores_temperature():
+    op = LLMOperative("Test", temperature=0.7)
+    assert op.temperature == 0.7
+
+def test_operative_passes_temperature_to_ollama(monkeypatch):
+    captured = {}
+
+    def mock_chat(*args, **kwargs):
+        captured["options"] = kwargs.get("options", {})
+        return {"message": {"content": "Apple Tree"}}
+
+    monkeypatch.setattr("src.agents.operative_llm.ollama.chat", mock_chat)
+
+    op = LLMOperative("Test", temperature=0.7)
+    board = [{"word": "Apple", "revealed": False}, {"word": "Tree", "revealed": False}]
+    op.guess_words(board, "fruit", 2)
+
+    assert captured.get("options", {}).get("temperature") == 0.7
+
+def test_single_cot_stores_temperature():
+    sm = Single_COT_LLMSpymaster("Test", temperature=0.5)
+    assert sm.temperature == 0.5
+
+def test_single_cot_passes_temperature_to_ollama(monkeypatch):
+    captured = {}
+
+    def mock_chat(*args, **kwargs):
+        captured["options"] = kwargs.get("options", {})
+        return {"message": {"content": "fruit 2"}}
+
+    monkeypatch.setattr("src.agents.single_COT_llm.ollama.chat", mock_chat)
+
+    sm = Single_COT_LLMSpymaster("Test", temperature=0.5)
+    sm.give_clue(TEST_BOARD, ["Apple", "Tree"])
+
+    assert captured.get("options", {}).get("temperature") == 0.5
+
+def test_double_cot_stores_temperature():
+    sm = Double_COT_LLMSpymaster("Test", temperature=0.3)
+    assert sm.temperature == 0.3
+
+def test_double_cot_passes_temperature_to_ollama(monkeypatch):
+    captured = {}
+
+    def mock_chat(*args, **kwargs):
+        captured["options"] = kwargs.get("options", {})
+        return {"message": {"content": '{"group": ["Apple"]}'}}
+
+    monkeypatch.setattr("src.agents.double_COT_llm.ollama.chat", mock_chat)
+
+    sm = Double_COT_LLMSpymaster("Test", temperature=0.3)
+    sm._call_llm_text("any prompt")
+
+    assert captured.get("options", {}).get("temperature") == 0.3
+
+def test_double_cot_sr_stores_temperature():
+    sm = Double_COT__SR_LLM_Spymaster("Test", temperature=0.9)
+    assert sm.temperature == 0.9

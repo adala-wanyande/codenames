@@ -21,11 +21,12 @@ if gemini_key:
 from src.agents.operative_llm import LLMOperative
 
 class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5", operative=None):
+    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0, operative=None):
         super().__init__(name)
-        
+
         self.model_type = model_type.lower()
         self.model_name = model_name
+        self.temperature = temperature
         self.uses_internal_policy = True
         self.invalid_clue = set()
         if operative:
@@ -144,7 +145,7 @@ class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
                 response = ollama.chat(model=self.model_name, messages=[
                     {'role': 'system', 'content': 'Follow formatting strictly.'},
                     {'role': 'user', 'content': prompt}
-                ])
+                ], options={"temperature": self.temperature})
                 output = response['message']['content']
 
             elif self.model_type == "gemini":
@@ -327,7 +328,7 @@ class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
                 response = ollama.chat(model=self.model_name, messages=[
                     {'role': 'system', 'content': 'Follow formatting strictly.'},
                     {'role': 'user', 'content': prompt}
-                ])
+                ], options={"temperature": self.temperature})
                 output = response['message']['content'].strip()
                 # take FIRST token only, ignore numbers
                 clue = re.findall(r"[a-zA-Z]+", output)[0].lower()
