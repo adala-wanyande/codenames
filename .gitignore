@@ -30,3 +30,6 @@ data/logs/
 *.synctex.gz
 *.fls
 *.fdb_latexmk
+
+.claude/
+.pytest_cache
