@@ -39,8 +39,11 @@ def load_data():
 
 def plot_win_rate_and_length(match_df):
     """
-    Side-by-side grouped bar: Win Rate (%) and Avg Turns to Win,
-    grouped by Prompt_Strategy, coloured by Model_Label.
+    Side-by-side grouped bar: Win Rate (%) and Avg Turns to Win.
+    Only renders bars for (strategy, model) pairs that have actual data —
+    no placeholder empty bars for missing combinations.
+    Bar width within each strategy group scales to however many models
+    are present for that strategy, so groups always look full.
     """
     agg = (
         match_df.groupby(["Prompt_Strategy", "Model_Label"])
@@ -49,39 +52,52 @@ def plot_win_rate_and_length(match_df):
     )
 
     strategies  = [s for s in PROMPT_ORDER if s in agg["Prompt_Strategy"].unique()]
-    models      = sorted(agg["Model_Label"].unique())
-    palette     = sns.color_palette("tab10", len(models))
-    model_color = dict(zip(models, palette))
+    all_models  = sorted(agg["Model_Label"].unique())
+    palette     = sns.color_palette("tab10", len(all_models))
+    model_color = dict(zip(all_models, palette))
 
-    x     = range(len(strategies))
-    width = 0.8 / max(len(models), 1)
+    # Maximum models in any one strategy — sets the finest bar width
+    max_per_group = max(
+        len(agg[agg["Prompt_Strategy"] == s]) for s in strategies
+    )
+    bar_width = 0.8 / max(max_per_group, 1)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    legend_handles: dict = {}
 
-    for i, model in enumerate(models):
-        sub    = agg[agg["Model_Label"] == model].set_index("Prompt_Strategy")
-        offset = (i - len(models) / 2 + 0.5) * width
-        wins   = [sub.loc[s, "Win_Rate"] if s in sub.index else 0 for s in strategies]
-        turns  = [sub.loc[s, "Avg_Turns"] if s in sub.index else 0 for s in strategies]
-        xpos   = [xi + offset for xi in x]
-        axes[0].bar(xpos, wins,  width=width * 0.9, color=model_color[model], label=model)
-        axes[1].bar(xpos, turns, width=width * 0.9, color=model_color[model], label=model)
+    for strat_idx, strategy in enumerate(strategies):
+        group = agg[agg["Prompt_Strategy"] == strategy].reset_index(drop=True)
+        n = len(group)
+        for j, row in group.iterrows():
+            model  = row["Model_Label"]
+            offset = (j - n / 2 + 0.5) * bar_width
+            xpos   = strat_idx + offset
+
+            b0 = axes[0].bar(xpos, row["Win_Rate"],  width=bar_width * 0.9,
+                             color=model_color[model])
+            axes[1].bar(xpos, row["Avg_Turns"], width=bar_width * 0.9,
+                        color=model_color[model])
+
+            if model not in legend_handles:
+                legend_handles[model] = b0[0]
 
     for ax, title, ylabel in [
         (axes[0], "Win Rate (Red team) by Prompt Strategy", "Win Rate"),
         (axes[1], "Average Game Length by Prompt Strategy",  "Avg Turns"),
     ]:
-        ax.set_xticks(list(x))
+        ax.set_xticks(range(len(strategies)))
         ax.set_xticklabels(strategies, rotation=20, ha="right", fontsize=9)
         ax.set_title(title)
         ax.set_ylabel(ylabel)
 
     axes[0].set_ylim(0, 1.05)
-    axes[0].axhline(0.5, color="grey", linestyle="--", linewidth=0.8, label="50% baseline")
+    baseline_line = axes[0].axhline(
+        0.5, color="grey", linestyle="--", linewidth=0.8)
     axes[0].yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1))
 
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=len(models) + 1,
+    handles = list(legend_handles.values()) + [baseline_line]
+    labels  = list(legend_handles.keys())   + ["50% baseline"]
+    fig.legend(handles, labels, loc="lower center", ncol=len(handles),
                bbox_to_anchor=(0.5, -0.08), fontsize=9)
     plt.tight_layout(rect=[0, 0.06, 1, 1])
     _save("win_rate_by_strategy.png")
