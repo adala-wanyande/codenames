@@ -1,11 +1,7 @@
-import os
 import re
-import json
-import ollama
-import google.generativeai as genai
-from dotenv import load_dotenv
 from .base import SpymasterAgent
 from .prompts import double_COT_prompt
+from .llm_client import LLMClient
 
 load_dotenv()
 
@@ -28,6 +24,10 @@ class Double_COT_LLMSpymaster(SpymasterAgent):
         self.model_name = model_name
         self.temperature = temperature
         self.invalid_clue = set()
+        self.llm = LLMClient(
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature)
 
     # -------------------------
     # STEP 1: GROUP SELECTION
@@ -133,41 +133,16 @@ class Double_COT_LLMSpymaster(SpymasterAgent):
 
         return clue, count
 
-    def _call_llm_text(self, prompt):
-        try:
-            if self.model_type == "ollama":
-                response = ollama.chat(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": "Return ONLY valid output."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    options={"temperature": self.temperature}
-                )
-                return response["message"]["content"].strip()
+    def _call_llm_text(self, prompt, **options):
+        return self.llm.call_text(
+            prompt,
+            system="Return ONLY valid output.",
+            **options,
+        )
 
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                return response.text.strip()
-
-        except Exception as e:
-            print(f"❌ LLM error: {e}")
-            return ""
-
-    def _call_llm_json(self, prompt):
-        """
-        Safe JSON extraction for step 1 grouping.
-        """
-        try:
-            raw = self._call_llm_text(prompt)
-
-            match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if not match:
-                return {}
-
-            return json.loads(match.group(0))
-
-        except Exception as e:
-            print(f"❌ JSON parse error: {e}")
-            return {}
+    def _call_llm_json(self, prompt, **options):
+        return self.llm.call_json(
+            prompt,
+            system="Return ONLY valid JSON.",
+            **options,
+        )
