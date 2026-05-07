@@ -1,14 +1,10 @@
-import os
 from tokenize import group
-import ollama
-import google.generativeai as genai
-from dotenv import load_dotenv
-from prompt_toolkit import prompt
 from .base import SpymasterAgent
 import re
 import json
 import random
 from .prompts import double_COT_prompt, operative_prompt
+from .llm_client import LLMClient
 
 # Load API keys safely from the .env file
 load_dotenv()
@@ -34,6 +30,10 @@ class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
         else:
             self.operative = LLMOperative("Default")
         self.clue_cache = {}
+        self.llm = LLMClient(
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature)
 
     def simulate_clue(self, clue, count, board_state):
         """
@@ -141,20 +141,10 @@ class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
         )
         
         try:
-            if self.model_type == "ollama":
-                response = ollama.chat(model=self.model_name, messages=[
-                    {'role': 'system', 'content': 'Follow formatting strictly.'},
-                    {'role': 'user', 'content': prompt}
-                ], options={"temperature": self.temperature})
-                output = response['message']['content']
-
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                output = response.text
-
-            else:
-                raise ValueError
+            output = self.llm.call_text(
+                prompt,
+                system="Follow formatting strictly.",
+            )
 
             groups = []
 
@@ -324,24 +314,16 @@ class Double_COT__SR_LLM_Spymaster(SpymasterAgent):
         )
 
         try:
-            if self.model_type == "ollama":
-                response = ollama.chat(model=self.model_name, messages=[
-                    {'role': 'system', 'content': 'Follow formatting strictly.'},
-                    {'role': 'user', 'content': prompt}
-                ], options={"temperature": self.temperature})
-                output = response['message']['content'].strip()
-                # take FIRST token only, ignore numbers
-                clue = re.findall(r"[a-zA-Z]+", output)[0].lower()
+            output = self.llm.call_text(
+                prompt,
+                system="Follow formatting strictly.",
+            ).strip()
 
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                output = response.text.strip()
-                clue = re.findall(r"[a-zA-Z]+", output)[0].lower()
+            matches = re.findall(r"[a-zA-Z]+", output)
+            if not matches:
+                return "ERROR", 0
 
-
-            else:
-                raise ValueError(f"Unsupported model type: {self.model_type}")
+            clue = matches[0].lower()
 
             
             return clue, target_count

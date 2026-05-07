@@ -1,19 +1,30 @@
 from tokenize import group
-import ollama
-import google.generativeai as genai
-from dotenv import load_dotenv
-from prompt_toolkit import prompt
 from .base import OperativeAgent
 import re
 from .prompts import operative_prompt
+from .llm_client import LLMClient
 
 
 class LLMOperative(OperativeAgent):
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0):
+    def __init__(
+        self,
+        name,
+        model_type="ollama",
+        model_name="qwen2.5",
+        temperature=0.0,
+        **llm_options,
+    ):
         super().__init__(name)
         self.model_type = model_type.lower()
         self.model_name = model_name
         self.temperature = temperature
+
+        self.llm = LLMClient(
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature,
+            **llm_options,
+        )
 
     def guess_words(self, board_state, clue_word, num_guesses, simulate = False):
         if simulate == False:
@@ -24,20 +35,10 @@ class LLMOperative(OperativeAgent):
         prompt = operative_prompt(num_guesses=num_guesses, clue_word=clue_word, available_words=available_words)
         
         try:
-            if self.model_type == "ollama":
-                response = ollama.chat(model=self.model_name, messages=[
-                    {'role': 'system', 'content': 'You are a helpful AI playing a word game. You follow formatting rules strictly.'},
-                    {'role': 'user', 'content': prompt}
-                ], options={"temperature": self.temperature})
-                output = response['message']['content'].strip()
-
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                output = response.text.strip()
-                
-            else:
-                raise ValueError(f"Unsupported model type: {self.model_type}")
+            output = self.llm.call_text(
+                prompt,
+                system="You are a helpful AI playing a word game. You follow formatting rules strictly.",
+            )
 
             raw_words = [word.strip() for word in output.split(',')]
 

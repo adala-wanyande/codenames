@@ -1,10 +1,7 @@
-import os
-import ollama
-import google.generativeai as genai
-from dotenv import load_dotenv
 from .base import SpymasterAgent, OperativeAgent
 from .prompts import single_COT_prompt
 import re
+from .llm_client import LLMClient
 
 load_dotenv()
 
@@ -19,12 +16,26 @@ class Single_COT_LLMSpymaster(SpymasterAgent):
     No simulation, no grouping, no CoT.
     """
 
-    def __init__(self, name, model_type="ollama", model_name="qwen2.5", temperature=0.0):
+    def __init__(
+        self,
+        name,
+        model_type="ollama",
+        model_name="qwen2.5",
+        temperature=0.0,
+        **llm_options,
+    ):
         super().__init__(name)
         self.model_type = model_type.lower()
         self.model_name = model_name
         self.temperature = temperature
         self.invalid_clue = set()
+
+        self.llm = LLMClient(
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature,
+            **llm_options,
+        )
 
     def give_clue(self, board_state, target_words, shot = 0):
         assassin = [
@@ -50,20 +61,10 @@ class Single_COT_LLMSpymaster(SpymasterAgent):
             shot=shot
             )
         try:
-            if self.model_type == "ollama":
-                response = ollama.chat(model=self.model_name, messages=[
-                    {"role": "system", "content": "You strictly follow output format."},
-                    {"role": "user", "content": prompt}
-                ], options={"temperature": self.temperature})
-                output = response["message"]["content"].strip()
-
-            elif self.model_type == "gemini":
-                model = genai.GenerativeModel(self.model_name)
-                response = model.generate_content(prompt)
-                output = response.text.strip()
-
-            else:
-                raise ValueError(f"Unsupported model type: {self.model_type}")
+            output = self.llm.call_text(
+                prompt,
+                system="You strictly follow output format.",
+            )
 
             # --- Parse output ---
             parts = output.split()

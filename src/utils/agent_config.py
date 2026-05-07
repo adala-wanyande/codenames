@@ -5,35 +5,34 @@ from src.agents.baseline import Word2VecSpymaster, Word2VecOperative
 from src.agents.operative_llm import LLMOperative
 
 
-def build_spymaster(spymaster_type, shot, operative=None, model_name="qwen2.5", temperature=0.0):
+def build_spymaster(spymaster_type, shot, operative=None, model_type="ollama", model_name="qwen2.5", temperature=0.0):
     if spymaster_type == "word2vec":
         return Word2VecSpymaster(name="Word2Vec Spymaster")
 
-    elif spymaster_type == "double_cot_SR":
-        return Double_COT__SR_LLM_Spymaster(
-            name=f"Double COT SR ({model_name})",
-            model_type="ollama",
-            model_name=model_name,
-            temperature=temperature,
-            operative=operative
-        )
-
     elif spymaster_type == "single_cot":
         return Single_COT_LLMSpymaster(
-            name=f"Single COT ({model_name})",
-            model_type="ollama",
+            name="Single COT Spymaster",
+            model_type=model_type,
             model_name=model_name,
-            temperature=temperature
+            temperature=temperature,
         )
 
     elif spymaster_type == "double_cot":
         return Double_COT_LLMSpymaster(
-            name=f"Double COT ({model_name})",
-            model_type="ollama",
+            name="Double COT Spymaster",
+            model_type=model_type,
             model_name=model_name,
-            temperature=temperature
+            temperature=temperature,
         )
 
+    elif spymaster_type == "double_cot_SR":
+        return Double_COT__SR_LLM_Spymaster(
+            name="Double COT SR Spymaster",
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature,
+            operative=operative,
+        )
     else:
         raise ValueError(f"Unknown spymaster_type: {spymaster_type}")
 

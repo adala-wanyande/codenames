@@ -20,10 +20,11 @@ def run_automated_game(
     game=None,
     spymaster=None,
     operative=None,
-    metrics=None,   # optional runtime helper only
+    metrics=None,
     spymaster_type="single_cot",
     shot=1,
     logger=None,
+    model_type="ollama",
     model_name="qwen2.5",
     temperature=0.0
 ):
@@ -34,16 +35,20 @@ def run_automated_game(
     if operative is None:
         from src.agents.operative_llm import LLMOperative
         operative = LLMOperative(
-            name="Operative Qwen",
-            model_type="ollama",
-            model_name="qwen2.5"
+            name=f"Operative {model_name}",
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature,
         )
 
     if spymaster is None:
-        spymaster = build_spymaster(
+        spymaster = spymaster = build_spymaster(
             spymaster_type=spymaster_type,
             shot=shot,
-            operative=operative
+            operative=operative,
+            model_type=model_type,
+            model_name=model_name,
+            temperature=temperature,
         )
 
     match_id = f"{spymaster_type}_{shot}_{id(game)}"
@@ -274,6 +279,25 @@ if __name__ == "__main__":
         choices=[0, 1, 2]
     )
 
+    parser.add_argument(
+    "--model_type",
+    type=str,
+    default="ollama",
+    choices=["ollama", "gemini", "claude"]
+    )
+
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="qwen2.5"
+    )
+
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0
+    )
+
     args = parser.parse_args()
     run_automated_game(
         game=None,
@@ -281,5 +305,8 @@ if __name__ == "__main__":
         operative=None,
         metrics=None,
         spymaster_type=args.spymaster_type,
-        shot=args.shot
+        shot=args.shot,
+        model_type=args.model_type,
+        model_name=args.model_name,
+        temperature=args.temperature,
     )
