@@ -116,4 +116,4 @@ def run_tournament(n_games=10):
 
 
 if __name__ == "__main__":
-    run_tournament(n_games=3)
+    run_tournament(n_games=10)
