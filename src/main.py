@@ -18,35 +18,56 @@ SAMPLE_VOCAB = [
 
 def run_automated_game(
     game=None,
-    spymaster=None,
-    operative=None,
+    red_spymaster=None,
+    blue_spymaster=None,
+
+    red_operative=None,
+    blue_operative=None,
     metrics=None,   # optional runtime helper only
     spymaster_type="single_cot",
     shot=1,
     logger=None,
     model_name="qwen2.5",
-    temperature=0.0
+    temperature=0.0,
+    match_id = None
 ):
     print("🤖 STARTING AI vs AI CODENAMES MATCH 🤖\n")
     if game is None:
         game = CodenamesGame(SAMPLE_VOCAB)
 
-    if operative is None:
+    if red_operative is None:
         from src.agents.operative_llm import LLMOperative
-        operative = LLMOperative(
-            name="Operative Qwen",
+
+        red_operative = LLMOperative(
+            name="Red Operative",
             model_type="ollama",
             model_name="qwen2.5"
         )
 
-    if spymaster is None:
-        spymaster = build_spymaster(
-            spymaster_type=spymaster_type,
-            shot=shot,
-            operative=operative
+    if blue_operative is None:
+        from src.agents.operative_llm import LLMOperative
+
+        blue_operative = LLMOperative(
+            name="Blue Operative",
+            model_type="ollama",
+            model_name="qwen2.5"
         )
 
-    match_id = f"{spymaster_type}_{shot}_{id(game)}"
+    if red_spymaster is None:
+        red_spymaster = build_spymaster(
+            spymaster_type=spymaster_type,
+            shot=shot,
+            operative=red_operative
+        )
+
+    if blue_spymaster is None:
+        blue_spymaster = build_spymaster(
+            spymaster_type="word2vec",   # baseline fixed
+            shot=0,
+            operative=blue_operative
+        )
+    if match_id is None:
+        match_id = f"default_match_{id(game)}"
 
     print("👀 INITIAL SPYMASTER BOARD 👀")
     game.display(view="spymaster")
@@ -57,6 +78,13 @@ def run_automated_game(
         print(f"\n{'='*10} TURN {game.turn_count} {'='*10}")
 
         team_color = game.current_team
+
+        if team_color == "Red":
+            current_spymaster = red_spymaster
+            current_operative = red_operative
+        else:
+            current_spymaster = blue_spymaster
+            current_operative = blue_operative
         spymaster_board = game.get_spymaster_board()
         unrevealed_targets = game.get_unrevealed_targets(team_color)
 
@@ -79,8 +107,12 @@ def run_automated_game(
             "assassin": 0,
             "invalid_clue": 0,
             "guess_trace": [],
+            "red_spymaster": type(red_spymaster).__name__,
+            "blue_spymaster": type(blue_spymaster).__name__,
             "spymaster_type": spymaster_type,
             "shot": shot,
+            "red_model": getattr(red_spymaster, "model_name", "baseline"),
+            "blue_model": getattr(blue_spymaster, "model_name", "baseline"),
             "model_name": model_name,
             "temperature": temperature,
         }
@@ -101,13 +133,13 @@ def run_automated_game(
         # -------------------------
         # SPYMASTER
         # -------------------------
-        if getattr(spymaster, "uses_internal_policy", False):
-            result = spymaster.group_words(
+        if getattr(current_spymaster, "uses_internal_policy", False):
+            result = current_spymaster.group_words(
                 spymaster_board,
                 unrevealed_targets
             )
         else:
-            result = spymaster.give_clue(
+            result = current_spymaster.give_clue(
                 spymaster_board,
                 unrevealed_targets,
                 shot=shot
@@ -138,7 +170,7 @@ def run_automated_game(
         turn_record["invalid_clue"] = invalid_flag
 
         if invalid_flag:
-            spymaster.invalid_clue.add(clue)
+            current_spymaster.invalid_clue.add(clue)
 
             board_words = [item["word"] for item in spymaster_board]
 
@@ -162,7 +194,7 @@ def run_automated_game(
         # OPERATIVE
         # -------------------------
         operative_board = game.get_operative_board()
-        guesses = operative.guess_words(operative_board, clue, count)
+        guesses = current_operative.guess_words(operative_board, clue, count)
 
         if not guesses:
             available = [
@@ -253,9 +285,10 @@ def run_automated_game(
     print("*" * 30)
 
     return {
-        "spymaster_type": spymaster_type,
-        "shot": shot,
-        "game": game
+        "game": game,
+        "shot": shot, 
+        "red_spymaster": red_spymaster,
+        "blue_spymaster": blue_spymaster,
     }
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Codenames AI simulation")
@@ -277,8 +310,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     run_automated_game(
         game=None,
-        spymaster=None,
-        operative=None,
+        red_spymaster=None,
+        blue_spymaster=None,
+        red_operative=None,
+        blue_operative=None,
         metrics=None,
         spymaster_type=args.spymaster_type,
         shot=args.shot
