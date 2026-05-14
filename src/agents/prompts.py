@@ -160,18 +160,6 @@ class double_COT_prompt():
                 Select the BEST subset of TARGET WORDS (1 to 8 words) that share a strong semantic connection. Maximize the number of target words covered by ONE clue,
                 while MINIMIZING risk of association with dangerous words.
 
-                You must balance:
-                - Coverage (more words is better)
-                - Safety (no overlap with dangerous words)
-                - Prefer the largest coherent group possible
-                - BUT never force weak or ambiguous connections
-                - Only select words that clearly belong together
-
-                You are penalized for:
-                - Groups of size 1 unless NO safe multi-word group exists
-                - Too small groups
-                - Groups that could relate to dangerous words
-
                 ====================
                 INPUT
                 ====================
@@ -397,7 +385,6 @@ class double_COT_prompt():
                 STRICT RULES (MUST FOLLOW)
                 ====================
                 1. Output EXACTLY: <one_word> <number>
-                - Example: pet 3
                 - NO quotes, NO punctuation, NO extra text
 
                 2. Clue must be ONE WORD only:
