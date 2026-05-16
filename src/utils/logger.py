@@ -1,15 +1,24 @@
 import pandas as pd
 import os
 import csv
+import json
 from datetime import datetime
 
+
 class TournamentLogger:
-    def __init__(self, filename="tournament_results.csv"):
+
+    def __init__(self, filename="tournament_results_vs_baseline.csv"):
         self.filename = os.path.join("data", "logs", filename)
-        # Create the directories if they don't exist
+
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
+
         self.match_data = []
         self.turn_data = []
+
+    # =========================================================
+    # PROMPT STRATEGY LABELS
+    # =========================================================
+
     @staticmethod
     def _prompt_strategy(spymaster_type, shot):
         mapping = {
@@ -21,146 +30,287 @@ class TournamentLogger:
             ("double_cot_SR", 0): "SR-CoT",
             ("double_cot_SR", 1): "SR-CoT+Few-Shot",
         }
-        return mapping.get((spymaster_type, shot), f"{spymaster_type}|{shot}")
+
+        return mapping.get(
+            (spymaster_type, shot),
+            f"{spymaster_type}|{shot}"
+        )
+
+    # =========================================================
+    # MODEL DISPLAY LABELS
+    # =========================================================
 
     @staticmethod
     def _model_label(model_name):
+
         labels = {
-            "word2vec":   "Word2Vec",
-            "qwen2.5":    "Qwen-2.5",
-            "qwen3":      "Qwen-3",
-            "mistral":    "Mistral",
-            "llama3":     "LLaMA-3",
+            "word2vec": "Word2Vec",
+            "qwen2.5":  "Qwen-2.5",
+            "qwen3":    "Qwen-3",
+            "mistral":  "Mistral",
+            "llama3":   "LLaMA-3",
         }
+
         return labels.get(model_name, model_name)
 
+    # =========================================================
+    # TURN-LEVEL LOGGING
+    # =========================================================
+
     def log_turn(
-            self,
-            match_id,
-            turn,
-            team,
-            words_left,
-            clue,
-            count,
-            guesses,
-            correct,
-            wrong,
-            assassin,
-            invalid_clue,
-            guess_trace,
-            spymaster_type,
-            model_name="qwen2.5",
-            temperature=0.0,
-            shot=0,
-        ):
+        self,
+        match_id,
+        turn,
+        team,
+        words_left,
+        clue,
+        count,
+        guesses,
+        correct,
+        wrong,
+        assassin,
+        invalid_clue,
+        guess_trace,
+        red_spymaster,
+        blue_spymaster,
+        spymaster_type,
+        red_model,
+        blue_model,
+        model_name="qwen2.5",
+        temperature=0.0,
+        shot=0,
+    ):
+
         self.turn_data.append({
-            "Match_ID":        match_id,
-            "Turn":            turn,
-            "Team":            team,
-            "Words_Left":      words_left,
-            "Clue":            clue,
-            "Clue_Count":      count,
-            "Guesses":         len(guesses),
+
+            # ---------- identifiers ----------
+            "Match_ID": match_id,
+            "Turn": turn,
+            "Team": team,
+
+            # ---------- clue ----------
+            "Clue": clue,
+            "Clue_Count": count,
+            "Invalid_Clue": invalid_clue,
+            "Fallback_Clue": int(clue == "random"),
+
+            # ---------- guesses ----------
+            "Guesses_Made": len(guesses),
             "Correct_Guesses": correct,
-            "Wrong_Guesses":   wrong,
-            "Assassin_Hit":    assassin,
-            "Invalid_Clue":    invalid_clue,
-            "Guess_Trace":     guess_trace,
-            "Spymaster_Type":  spymaster_type,
-            "Shot":            shot,
-            "Prompt_Strategy": self._prompt_strategy(spymaster_type, shot),
-            "Model_Name":      model_name,
-            "Model_Label":     self._model_label(model_name),
-            "Temperature":     temperature,
-            "Fallback":        1 if clue == "random" else 0,
+            "Wrong_Guesses": wrong,
+            "Guess_Accuracy": (
+                correct / max(len(guesses), 1)
+            ),
+
+            # ---------- board state ----------
+            "Words_Left": words_left,
+
+            # ---------- outcomes ----------
+            "Assassin_Hit": assassin,
+
+            # ---------- trace ----------
+            "Guess_Trace": json.dumps(guess_trace),
+
+            # ---------- experiment ----------
+            "Spymaster_Type": spymaster_type,
+            "Prompt_Strategy": self._prompt_strategy(
+                spymaster_type,
+                shot
+            ),
+            "Shot": shot,
+
+            # ---------- models ----------
+            "Red_Model": red_model,
+            "Blue_Model": blue_model,
+            "Model_Name": model_name,
+            "Model_Label": self._model_label(model_name),
+            "Temperature": temperature,
+
+            # ---------- agents ----------
+            "Red_Spymaster": red_spymaster,
+            "Blue_Spymaster": blue_spymaster,
+
+            # ---------- timestamp ----------
+            "Timestamp": datetime.now().isoformat(),
         })
 
-    def log_match(self, match_id, spymaster_name, operative_name, game_engine,
-                  spymaster_type=None, shot=None, model_name="qwen2.5", temperature=0.0):
-        win = game_engine.winner
+    # =========================================================
+    # MATCH-LEVEL LOGGING
+    # =========================================================
 
-        match_stats = {
-            "Match_ID":        match_id,
-            "Spymaster":       spymaster_name,
-            "Spymaster_Type":  spymaster_type,
-            "Shot":            shot,
-            "Prompt_Strategy": self._prompt_strategy(spymaster_type, shot),
-            "Model_Name":      model_name,
-            "Model_Label":     self._model_label(model_name),
-            "Temperature":     temperature,
-            "Operative":       operative_name,
-            "Win":             win,
-            "Turns_Taken":     game_engine.turn_count,
-            "Red_Cards_Found": getattr(game_engine, "red_found", 0),
-            "Blue_Cards_Found":getattr(game_engine, "blue_found", 0),
-        }
-        
-        self.match_data.append(match_stats)
+    def log_match(
+        self,
+        match_id,
+        game_engine,
+
+        red_spymaster,
+        blue_spymaster,
+
+        red_model,
+        blue_model,
+
+        spymaster_type,
+        shot,
+
+        model_name="qwen2.5",
+        temperature=0.0,
+    ):
+
+        winner = game_engine.winner
+
+        self.match_data.append({
+
+            # ---------- identifiers ----------
+            "Match_ID": match_id,
+
+            # ---------- winner ----------
+            "Winner": winner,
+            "Red_Win": int(winner == "Red"),
+            "Blue_Win": int(winner == "Blue"),
+
+            # ---------- game stats ----------
+            "Turns_Taken": game_engine.turn_count,
+
+            "Red_Cards_Found": getattr(
+                game_engine,
+                "red_found",
+                0
+            ),
+
+            "Blue_Cards_Found": getattr(
+                game_engine,
+                "blue_found",
+                0
+            ),
+
+            # ---------- strategy ----------
+            "Spymaster_Type": spymaster_type,
+
+            "Prompt_Strategy": self._prompt_strategy(
+                spymaster_type,
+                shot
+            ),
+
+            "Shot": shot,
+
+            # ---------- model ----------
+            "Model_Name": model_name,
+            "Model_Label": self._model_label(model_name),
+            "Temperature": temperature,
+
+            # ---------- teams ----------
+            "Red_Spymaster": red_spymaster,
+            "Blue_Spymaster": blue_spymaster,
+
+            "Red_Model": red_model,
+            "Blue_Model": blue_model,
+
+            # ---------- timestamp ----------
+            "Timestamp": datetime.now().isoformat(),
+        })
+
+    # =========================================================
+    # SAVE CSV FILES
+    # =========================================================
 
     def save_results(self):
+
         match_df = pd.DataFrame(self.match_data)
         turn_df = pd.DataFrame(self.turn_data)
 
         match_path = self.filename
-        turn_path = self.filename.replace(".csv", "_turns.csv")
+        turn_path = self.filename.replace(
+            ".csv",
+            "_turns.csv"
+        )
 
         match_df.to_csv(match_path, index=False)
         turn_df.to_csv(turn_path, index=False)
 
-        print(f"\n📊 Match results saved to {match_path}")
-        print(f"📊 Turn-level results saved to {turn_path}")
-        
+        print(f"\n📊 Match results saved to:")
+        print(match_path)
+
+        print(f"\n📊 Turn-level results saved to:")
+        print(turn_path)
+
+    # =========================================================
+    # SUMMARY
+    # =========================================================
+
     def print_summary(self):
+
         df = pd.DataFrame(self.match_data)
 
-        # ✅ Convert to numeric
-        df["Red_Win"] = (df["Win"] == "Red").astype(int)
+        if df.empty:
+            print("No matches logged.")
+            return
 
-        win_rate = df["Red_Win"].mean() * 100
+        red_win_rate = df["Red_Win"].mean() * 100
 
-        avg_turns = df[df["Win"] == "Red"]["Turns_Taken"].mean()
-        if pd.isna(avg_turns):
-            avg_turns = 0
+        avg_turns = (
+            df[df["Winner"] == "Red"]["Turns_Taken"]
+            .mean()
+        )
 
-        print("\n" + "="*30)
+        avg_turns = 0 if pd.isna(avg_turns) else avg_turns
+
+        print("\n" + "=" * 40)
         print("📈 TOURNAMENT SUMMARY 📈")
-        print(f"Total Games Played: {len(df)}")
-        print(f"Red Win Rate: {win_rate:.1f}%")
-        print(f"Avg Turns (Red wins): {avg_turns:.1f}")
+        print("=" * 40)
 
-        # ✅ Safe columns (avoid crashes)
-        if "Operative_Hallucinations" in df.columns:
-            print(f"Total Hallucinations: {df['Operative_Hallucinations'].sum()}")
+        print(f"Games Played: {len(df)}")
+        print(f"Red Win Rate: {red_win_rate:.2f}%")
+        print(f"Average Turns (Red wins): {avg_turns:.2f}")
 
-        if "Assassin_Hit" in df.columns:
-            print(f"Total Assassin Hits: {df['Assassin_Hit'].sum()}")
+        if "Temperature" in df.columns:
+            print("\nTemperature Settings:")
+            print(df["Temperature"].value_counts())
 
-        print("="*30)
+        print("=" * 40)
+
+
+# =============================================================
+# INVALID CLUE LOGGER
+# =============================================================
 
 class invalid_clues:
-    def log_invalid_clue(clue, team, turn, targets, board_words):
-        """
-        Appends an invalid clue event to a global CSV file.
-        File is shared across runs and safely created if missing.
-        """
+
+    @staticmethod
+    def log_invalid_clue(
+        clue,
+        team,
+        turn,
+        targets,
+        board_words
+    ):
 
         os.makedirs("data", exist_ok=True)
-        filepath = os.path.join("data", "spymaster_invalid_clues.csv")
+
+        filepath = os.path.join(
+            "data",
+            "spymaster_invalid_clues.csv"
+        )
 
         file_exists = os.path.isfile(filepath)
 
-        with open(filepath, mode="a", newline="", encoding="utf-8") as file:
+        with open(
+            filepath,
+            mode="a",
+            newline="",
+            encoding="utf-8"
+        ) as file:
+
             writer = csv.writer(file)
 
-            # Write header only once
             if not file_exists:
+
                 writer.writerow([
                     "timestamp",
                     "turn",
                     "team",
                     "clue",
                     "targets",
-                    "board_words"
+                    "board_words",
                 ])
 
             writer.writerow([
@@ -169,5 +319,5 @@ class invalid_clues:
                 team,
                 clue,
                 "|".join(targets),
-                "|".join(board_words)
+                "|".join(board_words),
             ])
