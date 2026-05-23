@@ -1,31 +1,28 @@
-
 # Evaluating LLM-Based Agents in Codenames
 
-This repository contains the code for our **Modern Game AI Algorithms** course project (Leiden University). We are building and evaluating AI agents to play the board game Codenames, systematically comparing traditional embedding-based methods (Word2Vec/GloVe) against massive cloud LLMs (Gemini, Claude) and efficient local LLMs (Qwen).
+This repository contains the code for our **Modern Game AI Algorithms** course project (Leiden University). We built a fully automated evaluation framework to simulate the board game Codenames, systematically comparing traditional embedding-based methods (Word2Vec/GloVe) against open-weight Large Language Models (Qwen, LLaMA-3, Mistral) operating under varying levels of prompt complexity.
 
 ## Team Members
-Currently, we are all collaborating across the codebase to build the core game engine, set up API connections, and design the initial agents:
-* Irshad Bakhtali
-* Irene Chrysovergi
-* Reshit Fazlija
-* Benard Wanyande
-* Lucas Zuurmond
+* **Irshad Bakhtali:** API \& Model Integration
+* **Irene Chrysovergi:** Prompt Engineering \& Simulation Search
+* **Reshit Fazlija:** Evaluation Framework \& Ablations
+* **Benard Wanyande:** Core Python Engine \& Baseline Architectures
+* **Lucas Zuurmond:** Data Logging \& Visualizations
 
 ---
 
-## Getting Started: Local Setup Guide
+## Local Setup Guide
 
-Follow these steps exactly to get the project running on your local machine. This setup requires configuring a Python environment, safely storing API keys, and downloading local AI models.
+Follow these steps to configure your Python environment, safely store API keys, and download the necessary local AI models.
 
 ### Step 1: Clone the Repository
-Open your terminal (or VS Code terminal) and run:
 ```bash
 git clone https://github.com/adala-wanyande/codenames.git
 cd codenames
 ```
 
 ### Step 2: Set Up the Virtual Environment
-We use a virtual environment to ensure everyone is using the exact same package versions and to avoid cluttering your computer's global Python installation.
+We use a virtual environment to ensure dependency consistency.
 
 **For Mac/Linux:**
 ```bash
@@ -37,94 +34,93 @@ source .venv/bin/activate
 python -m venv .venv
 .venv\Scripts\activate
 ```
-*You will know it worked if you see `(.venv)` at the beginning of your terminal line.*
 
-Once activated, install the required Python libraries:
+Once activated, install the required libraries:
 ```bash
 pip install -r requirements.txt
 ```
 
----
-
-### Step 3: Setting Up API Keys (Gemini & Claude)
-We use Google Gemini and Anthropic Claude for our cloud LLMs. **Crucial Rule: NEVER upload your actual API keys to GitHub.** 
-
-We use a `.env` file to keep them safe on your local machine only.
-1. Look in the main folder for a file named `.env.example`.
-2. Duplicate this file and rename the new copy to strictly `.env`.
-3. Open `.env` and paste your API keys inside so it looks like this:
-```text
-GEMINI_API_KEY=your_actual_gemini_key_here
-ANTHROPIC_API_KEY=your_actual_claude_key_here
-```
-*(Note: If you don't have personal API keys yet, you can leave these blank for now and just use the local Ollama models in Step 4).* Our `.gitignore` file is already configured to hide your `.env` file from Git.
-
----
+### Step 3: API Keys (Optional for Cloud Models)
+If you wish to test cloud models (Gemini/Claude), you must provide API keys safely via a `.env` file. **Never upload your actual API keys to GitHub.**
+1. Duplicate the `.env.example` file and rename it to `.env`.
+2. Paste your keys inside:
+   `GEMINI_API_KEY=your_actual_gemini_key_here`
 
 ### Step 4: Setting Up Local Models (Ollama)
-To run massive AI tournaments for free and ensure experimental reproducibility, we are running open-weight models locally on our own machines using Ollama.
-
-1. **Download Ollama:** Go to [ollama.com](https://ollama.com/) and download the app for your operating system.
-2. **Install and Run:** Install the app and make sure the Ollama application is actually open/running in the background of your computer (you should see its icon in your system tray/menu bar).
-3. **Download the Qwen 2.5 Model:** Open your terminal and run the following command. This will download the model weights (a few gigabytes, so it may take a few minutes):
+Our primary experiments run locally to ensure zero-cost, reproducible tournament scaling. 
+1. Install [Ollama](https://ollama.com/).
+2. Open your terminal and download the baseline evaluation model:
 ```bash
 ollama run qwen2.5
 ```
-4. **Test it:** Once it finishes downloading, it will open a chat prompt in your terminal. Say "Hello". Once it replies, type `/bye` to exit. 
-*Ollama is now permanently installed on your machine and Python can talk to it!*
+*(Type `/bye` to exit once it finishes downloading).*
 
 ---
 
-### Step 5: The Sanity Check
-To ensure your Python environment, API keys, and local Ollama models are set up perfectly, run the test script from the main folder:
+## Running the Code
 
-**Mac/Linux:** `python3 -m src.main`  
-**Windows:** `python -m src.main`  
+Our framework supports running individual sandbox matches as well as large-scale, automated benchmarking tournaments.
 
-If everything is working, you should see the Codenames board generate in the terminal, along with dummy outputs from the Agent files!
+### Option A: Run a Single Sandbox Match
+You can run a single game using `src.main`. This is useful for debugging specific prompt depths or shot counts. The script accepts two arguments: `--spymaster_type` and `--shot`.
+
+**Single Chain-of-Thought (Zero or Few-Shot):**
+```bash
+python3 -m src.main --spymaster_type single_cot --shot 1
+```
+**Double Chain-of-Thought (Separates Strategic Grouping and Clue Generation):**
+```bash
+python3 -m src.main --spymaster_type double_cot --shot 1
+```
+**Stochastic Rollout (MCTS-inspired Lookahead):**
+```bash
+python3 -m src.main --spymaster_type double_cot_SR --shot 1
+```
+
+### Option B: Run the Full Tournament
+To replicate the results from our academic paper, you can run the full tournament suite. This script loops through all agent configurations, plays `n_games` for each on fixed benchmark boards, logs the metrics to a CSV, and prints a final summary.
+
+```bash
+python3 -m src.tournament
+```
+*(Note: You can adjust `n_games` directly inside `src/tournament.py` before running).*
+
+### Option C: Generate Visualizations
+Once the tournament finishes and `data/logs/tournament_results.csv` is populated, you can generate the academic charts used in our report:
+```bash
+python3 -m evaluate.visualize
+```
+Plots will be saved directly to the `data/figures/` directory.
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```text
 codenames/
-├── src/                        # Main Python source code
-│   ├── engine/                 # Game logic, board state, rules (Numpy)
-│   ├── agents/                 # Agent logic (LLMs and Baselines)
-│   ├── utils/                  # Data logging, metrics (Pandas)
-│   └── main.py                 # Tournament execution & entry point
-├── data/                       # Local data (Ignored by Git)
-├── notebooks/                  # Jupyter notebooks for data visualization
-├── docs/                       # Final LNCS LaTeX report files
+├── src/
+│   ├── engine/                 # Game logic, board state, strict rules (Numpy)
+│   ├── agents/                 # LLM and Word2Vec agent architectures
+│   ├── utils/                  # Data logging, metrics, config factory
+│   ├── main.py                 # Single-game execution CLI
+│   └── tournament.py           # Automated multi-agent tournament runner
+├── evaluate/
+│   └── visualize.py            # Seaborn/Matplotlib visualization generator
+├── data/
+│   ├── logs/                   # Raw CSV outputs of tournament metrics
+│   └── figures/                # Generated academic plots
+├── tests/                      # Pytest suite enforcing game rules
+├── docs/                       # LNCS LaTeX report
 ├── .env.example                # Template for environment variables
 ├── .gitignore                  # Keeps our API keys and data safe
 └── requirements.txt            # Python dependencies
 ```
-### Prompt Variations
-In this repository, we attempt to compare the performance of agents with different prompts. The important traits we varied are the shots (examples) in prompts as well as the number of chain of thought (COT). In addition, we implement and additional agent that utilizes two chains of thoughts and evaluates the outputs with a utility function, effectively simulating stohastic rollouts, in order to improve performance.
 
-In order to run a game with zero (shot 0) or few shot (shot 1) prompting and only one chain of thought, run in the terminal from the main folder:
+## Git Workflow
+To avoid merge conflicts and preserve the integrity of the game engine, **please do not push directly to the `main` branch.** 
 
-**Mac/Linux:** `python3 -m src.main --spymaster_type single_cot --shot 1`  
-**Windows:** `python -m src.main --spymaster_type single_cot --shot 1`  
-
-Similarly, to run a game with zero (shot 0) or few shot (shot 1) prompting and two chains of thought, run in the terminal from the main folder:
-
-**Mac/Linux:** `python3 -m src.main --spymaster_type double_cot --shot 1`  
-**Windows:** `python -m src.main --spymaster_type double_cot --shot 1` 
-
-Lastly, to run a game with zero (shot 0) or few shot (shot 1) prompting, two chains of thought, and stohastic rollouts, run in the terminal from the main folder:
-
-**Mac/Linux:** `python3 -m src.main --spymaster_type double_cot_SR --shot 1`  
-**Windows:** `python -m src.main --spymaster_type double_cot_SR --shot 1` 
-
-## Git Workflow (Important!)
-To avoid merge conflicts and breaking the code, **please do not push directly to the `main` branch.** 
-
-When starting a new feature or task, follow this workflow:
-1. Get the latest code: `git checkout main` and then `git pull`
-2. Create a new branch: `git checkout -b feature/your-feature-name`
-3. Write your code, test it, and commit.
+1. Ensure you are up to date: `git checkout main` $\rightarrow$ `git pull`
+2. Create a feature branch: `git checkout -b feature/your-feature-name`
+3. Write your code, test it (`pytest`), and commit.
 4. Push your branch: `git push origin feature/your-feature-name`
-5. Go to GitHub and open a **Pull Request (PR)** so the team can review it before merging.
+5. Open a **Pull Request (PR)** on GitHub and request a review before merging.
